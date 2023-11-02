@@ -1,0 +1,56 @@
+---
+apiVersion: zookeeper.stackable.tech/v1alpha1
+kind: ZookeeperCluster
+metadata:
+  name: simple-zk
+spec:
+  image:
+    productVersion: 3.8.3
+  servers:
+    roleGroups:
+      default:
+        replicas: 1
+---
+apiVersion: zookeeper.stackable.tech/v1alpha1
+kind: ZookeeperZnode
+metadata:
+  name: simple-hdfs-znode
+spec:
+  clusterRef:
+    name: simple-zk
+---
+apiVersion: hdfs.stackable.tech/v1alpha1
+kind: HdfsCluster
+metadata:
+  name: simple-hdfs
+spec:
+  image:
+    productVersion: 3.3.6
+    custom: hdfs
+  clusterConfig:
+    listenerClass: external-unstable
+    dfsReplication: 1
+    zookeeperConfigMapName: simple-hdfs-znode
+    authentication:
+      tlsSecretClass: tls
+      kerberos:
+        secretClass: kerberos-default
+  nameNodes:
+    roleGroups:
+      default:
+        envOverrides:
+          HADOOP_CLASSPATH: "/stackable/hadoop/share/hadoop/tools/lib/*.jar"
+          TOPOLOGYLABEL1: "node:kubernetes.io/hostname"
+        configOverrides: # on rolegroup level, takes precedence over the ones specified at role level
+          core-site.xml:
+            hadoop.security.authorization: "true"
+            net.topology.node.switch.mapping.impl: "tech.stackable.hadoop.StackableTopologyProvider"
+        replicas: 2
+  dataNodes:
+    roleGroups:
+      default:
+        replicas: 1
+  journalNodes:
+    roleGroups:
+      default:
+        replicas: 1

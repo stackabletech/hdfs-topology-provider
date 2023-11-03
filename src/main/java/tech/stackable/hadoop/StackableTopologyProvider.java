@@ -27,6 +27,7 @@ import java.util.stream.Collectors;
 public class StackableTopologyProvider implements DNSToSwitchMapping {
 
     private static final int MAX_LEVELS_DEFAULT = 2;
+    private static final int CACHE_EXPIRY_DEFAULT_SECONDS = 5*60;
 
     private class TopologyLabel {
         LabelType labelType;
@@ -86,7 +87,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     private KubernetesClient client;
 
     private Cache<String, String> topologyKeyCache = Caffeine.newBuilder()
-            .expireAfterWrite(5, TimeUnit.MINUTES)
+            .expireAfterWrite(getCacheExpiration(), TimeUnit.SECONDS)
             .build();
 
 
@@ -144,6 +145,19 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             }
         }
         return MAX_LEVELS_DEFAULT;
+    }
+
+    private int getCacheExpiration() {
+        String cacheExpirationConfigSeconds = System.getenv("TOPOLOGY_CACHE_EXPIRATION_SECONDS");
+        if (cacheExpirationConfigSeconds != null && cacheExpirationConfigSeconds != "") {
+            LOG.info("Found TOPOLOGY_CACHE_EXPIRATION_SECONDS env var, changing cache time for topology entries.");
+            try {
+                int cacheExpirationFromEnvVar = Integer.parseInt(cacheExpirationConfigSeconds);
+            } catch (NumberFormatException e) {
+                LOG.warn("Unable to parse TOPOLOGY_CACHE_EXPIRATION_SECONDS as integer, using default value: " + e.getLocalizedMessage());
+            }
+        }
+        return CACHE_EXPIRY_DEFAULT_SECONDS;
     }
 
     private String getLabel(String datanode, Map<String, Map<String, String>> podLabels, Map<String, Map<String, String>> nodeLabels) {
@@ -237,9 +251,17 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         return result;
     }
 
-
+    /**
+     * Given a list of Pods, return a HashMap that maps pod ips onto Pod labels.
+     * The returned Map may contain more entries than the list that is given to this function,
+     * as an entry will be generated for every ip a pod has.
+     *
+     * @param pods List of all retrieved pods.
+     * @return Map of ip addresses to all labels the pod that "owns" that ip has attached to itself
+     */
     private Map<String, Map<String, String>> getPodLabels(List<Pod> pods) {
         Map<String, Map<String, String>> result = new HashMap<>();
+        // Iterate over all pods and then all ips for every pod and add these to the mapping
         for (Pod pod : pods) {
             for (PodIP podIp : pod.getStatus().getPodIPs()) {
                 result.put(podIp.getIp(), pod.getMetadata().getLabels());
@@ -248,9 +270,18 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         return result;
     }
 
+    /**
+     * Given lists of pods and nodes this function will resolve which pods run on which node as well as all the ips
+     * assigned to a pod.
+     * It will then return a mapping of every ip address to the labels that are attached to the "physical" node
+     * running the pod that this ip belongs to.
+     *
+     * @param pods List of all in-scope pods (datanode pods in this namespace)
+     * @param nodes List of all nodes running datanode pods (will effectively mean "all nodes")
+     * @return Map of ip addresses to labels of the node running the pod that the ip address belongs to
+     */
     private Map<String, Map<String, String>> getNodeLabels(List<Pod> pods, List<Node> nodes) {
         Map<String, Map<String, String>> result = new HashMap<>();
-        this.LOG.warn(nodes.toString());
         for (Pod pod : pods) {
             Map<String, String> nodeLabels = nodes.stream().filter(filterNode -> {
                 return filterNode.getMetadata().getName().equals(pod.getSpec().getNodeName());
@@ -265,11 +296,15 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     }
 
     public void reloadCachedMappings() {
+        // TODO: According to the upstream comment we should rebuild all cache entries after invalidating them
+        //  this may mean trying to resolve ip addresses that do not exist any more and things like that though and
+        //  require some more thought, so we will for now just invalidate the cache.
         this.topologyKeyCache.invalidateAll();
 
     }
 
     public void reloadCachedMappings(List<String> names) {
+        // TODO: See comment above, the same applies here
         for (String name : names) {
             this.topologyKeyCache.invalidate(name);
         }

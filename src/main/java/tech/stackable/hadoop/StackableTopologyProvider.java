@@ -35,6 +35,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
         /**
          * Create a new TopologyLabel from its string representation
+         *
          * @param value A string in the form of "[node|pod]:<labelname>" that is deserialized into a TopologyLabel.
          *              Invalid and empty strings are resolved into the type unspecified.
          */
@@ -44,7 +45,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
                 this.labelType = LabelType.Undefined;
                 return;
             }
-            String[] split = value.toLowerCase(Locale.ROOT).split( ":", 2);
+            String[] split = value.toLowerCase(Locale.ROOT).split(":", 2);
 
             // This should only fail if no : was present in the string
             if (split.length != 2) {
@@ -78,6 +79,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         Pod,
         Undefined
     }
+
     private KubernetesClient client;
 
     // The list of labels that this provider uses to generate the topologyinformation for any given datanode
@@ -155,22 +157,36 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             return names.stream().map(name -> "/defaultRack").collect(Collectors.toList());
         }
 
-
-        List<Pod> pods = client.pods().list().getItems();
-        LOG.warn("Retrieved pods: " + pods.stream().map(pod -> {
+        // Retrieve all datanode pods. This should be restricted to the current namespace by the serviceaccount
+        // we roll out in our helm charts anyway, so it is not further contained here.
+        List<Pod> pods = client
+                .pods()
+                .withLabel("app.kubernetes.io/component", "datanode")
+                .withLabel("app.kubernetes.io/name", "hdfs")
+                .list()
+                .getItems();
+        LOG.debug("Retrieved dn pods: " + pods.stream().map(pod -> {
             return pod.getMetadata().getName();
         }).collect(Collectors.toList()));
+
         List<Node> nodes = client.nodes().list().getItems();
-        LOG.warn("Retrieved nodes: " + pods.stream().map(node -> {
+        LOG.debug("Retrieved nodes: " + pods.stream().map(node -> {
             return node.getMetadata().getName();
         }).collect(Collectors.toList()));
 
+        // Build internal state that is later used to look up information.
+        // Basically this transposes pod and node lists into hashmaps where podips can be used to look up
+        // labels for the pods and nodes
+        // This is not terribly memory efficient because it effectively duplicates a lot of data in memory.
+        // But since we cache lookups, this should hopefully only be done every once in a while and is not kept
+        // in memory for extended amounts of time.
         List<String> result = new ArrayList<>();
         Map<String, Map<String, String>> nodeLabels = getNodeLabels(pods, nodes);
-        LOG.warn("Resolved nodelabels for: " + nodeLabels.keySet().toString());
+        LOG.debug("Resolved nodelabels for: " + nodeLabels.keySet().toString());
         Map<String, Map<String, String>> podLabels = getPodLabels(pods);
-        LOG.warn("Resolved podlabels for " + podLabels.keySet().toString());
+        LOG.debug("Resolved podlabels for " + podLabels.keySet().toString());
 
+        // Iterate over all nodes to resolve and return the topology zones
         for (String datanode : names) {
             result.add(getLabel(datanode, podLabels, nodeLabels));
         }

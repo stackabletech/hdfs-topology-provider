@@ -40,8 +40,7 @@ spec:
       default:
         envOverrides:
           HADOOP_CLASSPATH: "/stackable/hadoop/share/hadoop/tools/lib/*.jar"
-          TOPOLOGYLABEL1: "node:kubernetes.io/zone"
-          TOPOLOGYLABEL2: "pod:app.kubernetes.io/role-group"
+          TOPOLOGYLABELS: "node:kubernetes.io/zone;pod:app.kubernetes.io/role-group"
         configOverrides: # on rolegroup level, takes precedence over the ones specified at role level
           core-site.xml:
             hadoop.security.authorization: "true"

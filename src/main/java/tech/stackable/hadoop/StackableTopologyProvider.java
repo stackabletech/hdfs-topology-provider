@@ -1,5 +1,7 @@
 package tech.stackable.hadoop;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import io.fabric8.kubernetes.api.model.Node;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodIP;
@@ -12,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -82,6 +85,11 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
     private KubernetesClient client;
 
+    private Cache<String, String> topologyKeyCache = Caffeine.newBuilder()
+            .expireAfterWrite(5, TimeUnit.MINUTES)
+            .build();
+
+
     // The list of labels that this provider uses to generate the topologyinformation for any given datanode
     private List<TopologyLabel> labels;
 
@@ -91,22 +99,37 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         this.client = new DefaultKubernetesClient();
 
         // Read the labels to be used to build a topology from environment variables
-        // A fixed prefix of 'TOPOLOGYLABEL' is used for these vars, and the code simply increases a counter
-        // that is added to this prefix, starting with 1 - upon encountering the first empty label iteration is
-        // aborted.
+        // Labels are configured in the EnvVar "TOPOLOGY_LABELS".
+        // They should be specified in the form "[node|pod]:<labelname>" and separated by ;
+        // So a valid configuration that reads topologyinformation from the labels "kubernetes.io/zone" and
+        // "kubernetes.io/rack" on the k8s node that is running a datanode pod would look like this:
+        // "node:kubernetes.io/zone;node:kubernetes.io/rack"
+        //
         // By default, there is an upper limit of 2 on the number of labels that are processed, because this is what
         // Hadoop traditionally allows - this can be overridden via setting the EnvVar "MAX_TOPOLOGY_LEVELS".
-        this.labels = new ArrayList<>();
-        for (int i = 1; i <= getMaxLabels(); i++) {
-            TopologyLabel potentialLabel = new TopologyLabel(System.getenv("TOPOLOGYLABEL" + i));
-            if (potentialLabel.isUndefined()) {
-                // We break upon encountering the first undefined label
-                LOG.info("Reached end of defined topology labels, found [" + this.labels.size() + "] labels.");
-                break;
-            } else {
-                LOG.info("Adding topology-label [" + potentialLabel + "]");
-                this.labels.add(potentialLabel);
+        String topologyConfig = System.getenv("TOPOLOGY_LABELS");
+        if (topologyConfig != null && topologyConfig != "") {
+            String[] labelConfigs = topologyConfig.split(";");
+            if (labelConfigs.length > getMaxLabels()) {
+                LOG.error("Found [" + labelConfigs.length + "] topologylabels configured, but maximum allowed number is " + getMaxLabels() + "please check your config or raise the number of allowed labels.");
+                throw new RuntimeException();
             }
+            // Create TopologyLabels from config strings
+            this.labels = Arrays.stream(labelConfigs).map(labelConfig -> {
+                return new TopologyLabel(labelConfig);
+            }).collect(Collectors.toList());
+
+            // Check if any labelConfigs were invalid
+            if (!this.labels.stream().filter(label -> {
+                return label.labelType == LabelType.Undefined;
+            }).collect(Collectors.toList()).isEmpty()) {
+                LOG.error("Topologylabel contained invalid configuration for at least one label, please double check your config!");
+                throw new RuntimeException();
+            }
+
+        } else {
+            LOG.error("Mising env var \"TOPOLOGYLABELS\" this is required for rack awareness to work.");
+            throw new RuntimeException();
         }
     }
 
@@ -152,9 +175,26 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
     public List<String> resolve(List<String> names) {
         LOG.debug("Resolving nodes: " + names.toString());
+
         if (this.labels.size() == 0) {
             LOG.warn("No topology labels defined, returning \"/defaultrack\" for all nodes.");
             return names.stream().map(name -> "/defaultRack").collect(Collectors.toList());
+        }
+
+        // We need to check if we have cached values for all datanodes contained in this request.
+        // Unless we can answer everything from the cache we have to talk to k8s anyway and can just
+        // recalculate everything
+        List<String> cachedValues = names.stream().map(name -> {
+            return this.topologyKeyCache.getIfPresent(name);
+        }).collect(Collectors.toList());
+
+        if (cachedValues.contains(null)) {
+            // We cannot completely serve this request from the cache, since we need to talk to k8s anyway
+            // we'll simply refresh everything.
+            LOG.debug("Cache doesn't contain values for all requested nodes, new values will be built for all nodes.");
+        } else {
+            LOG.debug("Answering from cached topology keys.");
+            return cachedValues;
         }
 
         // Retrieve all datanode pods. This should be restricted to the current namespace by the serviceaccount
@@ -188,7 +228,11 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
         // Iterate over all nodes to resolve and return the topology zones
         for (String datanode : names) {
-            result.add(getLabel(datanode, podLabels, nodeLabels));
+            String builtLabel = getLabel(datanode, podLabels, nodeLabels);
+            result.add(builtLabel);
+
+            // Cache the value for potential use in a later request
+            this.topologyKeyCache.put(datanode, builtLabel);
         }
         return result;
     }
@@ -221,10 +265,13 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     }
 
     public void reloadCachedMappings() {
+        this.topologyKeyCache.invalidateAll();
 
     }
 
     public void reloadCachedMappings(List<String> names) {
-
+        for (String name : names) {
+            this.topologyKeyCache.invalidate(name);
+        }
     }
 }

@@ -28,6 +28,9 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
     private static final int MAX_LEVELS_DEFAULT = 2;
     private static final int CACHE_EXPIRY_DEFAULT_SECONDS = 5*60;
+    public static final String VARNAME_LABELS = "TOPOLOGY_LABELS";
+    public static final String VARNAME_CACHE_EXPIRATION = "TOPOLOGY_CACHE_EXPIRATION_SECONDS";
+    public static final String VARNAME_MAXLEVELS = "MAX_TOPOLOGY_LEVELS";
 
     private class TopologyLabel {
         LabelType labelType;
@@ -108,7 +111,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         //
         // By default, there is an upper limit of 2 on the number of labels that are processed, because this is what
         // Hadoop traditionally allows - this can be overridden via setting the EnvVar "MAX_TOPOLOGY_LEVELS".
-        String topologyConfig = System.getenv("TOPOLOGY_LABELS");
+        String topologyConfig = System.getenv(VARNAME_LABELS);
         if (topologyConfig != null && topologyConfig != "") {
             String[] labelConfigs = topologyConfig.split(";");
             if (labelConfigs.length > getMaxLabels()) {
@@ -129,32 +132,32 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             }
 
         } else {
-            LOG.error("Mising env var \"TOPOLOGYLABELS\" this is required for rack awareness to work.");
+            LOG.error("Missing env var \"" + VARNAME_LABELS + "\" this is required for rack awareness to work.");
             throw new RuntimeException();
         }
     }
 
     private int getMaxLabels() {
-        String envConfig = System.getenv("MAX_TOPOLOGY_LEVELS");
+        String envConfig = System.getenv(VARNAME_MAXLEVELS);
         if (envConfig != null && envConfig != "") {
             LOG.info("Found MAX_TOPOLOGY_LEVELS env var, changing allowed number of topology levels.");
             try {
                 int maxLevelsFromEnvVar = Integer.parseInt(envConfig);
             } catch (NumberFormatException e) {
-                LOG.warn("Unable to parse MAX_TOPOLOGY_LEVELS as integer, using default value: " + e.getLocalizedMessage());
+                LOG.warn("Unable to parse " + VARNAME_MAXLEVELS + " as integer, using default value: " + e.getLocalizedMessage());
             }
         }
         return MAX_LEVELS_DEFAULT;
     }
 
     private int getCacheExpiration() {
-        String cacheExpirationConfigSeconds = System.getenv("TOPOLOGY_CACHE_EXPIRATION_SECONDS");
+        String cacheExpirationConfigSeconds = System.getenv(VARNAME_CACHE_EXPIRATION);
         if (cacheExpirationConfigSeconds != null && cacheExpirationConfigSeconds != "") {
-            LOG.info("Found TOPOLOGY_CACHE_EXPIRATION_SECONDS env var, changing cache time for topology entries.");
+            LOG.info("Found " + VARNAME_CACHE_EXPIRATION + "env var, changing cache time for topology entries.");
             try {
                 int cacheExpirationFromEnvVar = Integer.parseInt(cacheExpirationConfigSeconds);
             } catch (NumberFormatException e) {
-                LOG.warn("Unable to parse TOPOLOGY_CACHE_EXPIRATION_SECONDS as integer, using default value: " + e.getLocalizedMessage());
+                LOG.warn("Unable to parse " + VARNAME_CACHE_EXPIRATION + " as integer, using default value: " + e.getLocalizedMessage());
             }
         }
         return CACHE_EXPIRY_DEFAULT_SECONDS;

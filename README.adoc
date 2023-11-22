@@ -56,3 +56,11 @@ Default: 2
 The maximum number of levels that can be specified to build a rack id from.
 
 While this can be changed, HDFS probably only supports a maximum of two levels, so it is not recommended to change the default for this setting.
+
+## Testing
+
+There are currently no unit tests.
+
+CRDs for spinning up test infratstructure are provided in `test/stack`.
+
+The actual testing for this happens in the integration tests of the HDFS operator.

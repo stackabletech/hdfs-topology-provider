@@ -30,7 +30,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     private static final int CACHE_EXPIRY_DEFAULT_SECONDS = 5*60;
     public static final String VARNAME_LABELS = "TOPOLOGY_LABELS";
     public static final String VARNAME_CACHE_EXPIRATION = "TOPOLOGY_CACHE_EXPIRATION_SECONDS";
-    public static final String VARNAME_MAXLEVELS = "MAX_TOPOLOGY_LEVELS";
+    public static final String VARNAME_MAXLEVELS = "TOPOLOGY_MAX_LEVELS";
 
     private class TopologyLabel {
         LabelType labelType;
@@ -127,7 +127,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             if (!this.labels.stream().filter(label -> {
                 return label.labelType == LabelType.Undefined;
             }).collect(Collectors.toList()).isEmpty()) {
-                LOG.error("Topologylabel contained invalid configuration for at least one label, please double check your config!");
+                LOG.error("Topologylabel contained invalid configuration for at least one label, please double check your config!\nLabels should be specified in the format '[pod|node]:<labelname>;...'");
                 throw new RuntimeException();
             }
 
@@ -135,34 +135,61 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             LOG.error("Missing env var \"" + VARNAME_LABELS + "\" this is required for rack awareness to work.");
             throw new RuntimeException();
         }
+        if (this.labels.isEmpty()) {
+            LOG.info("No topology config found, defaulting value for all datanodes to \"/defaultRack/\"");
+        }
     }
 
+    /***
+     * Checks if a value for the maximum number of topology levels to allow has been configured in
+     * the environment variable specified in VARNAME_MAXLEVELS,
+     * returns the value of MAX_LEVELS_DEFAULT as default if nothing is set.
+     *
+     * @return The maximum number of topology levels to allow.
+     */
     private int getMaxLabels() {
-        String envConfig = System.getenv(VARNAME_MAXLEVELS);
-        if (envConfig != null && envConfig != "") {
-            LOG.info("Found MAX_TOPOLOGY_LEVELS env var, changing allowed number of topology levels.");
+        String maxLevelsConfig = System.getenv(VARNAME_MAXLEVELS);
+        if (maxLevelsConfig != null && maxLevelsConfig != "") {
             try {
-                int maxLevelsFromEnvVar = Integer.parseInt(envConfig);
+                int maxLevelsFromEnvVar = Integer.parseInt(maxLevelsConfig);
+                LOG.info("Found " + VARNAME_MAXLEVELS + " env var, changing allowed number of topology levels to " + maxLevelsFromEnvVar + ".");
+                return maxLevelsFromEnvVar;
             } catch (NumberFormatException e) {
-                LOG.warn("Unable to parse " + VARNAME_MAXLEVELS + " as integer, using default value: " + e.getLocalizedMessage());
+                LOG.warn("Unable to parse value of " + VARNAME_MAXLEVELS + " [" + maxLevelsConfig + "] as integer, using default value: " + e.getLocalizedMessage());
             }
         }
         return MAX_LEVELS_DEFAULT;
     }
 
+    /***
+     * Checks if a value for the cache expiration time has been configured in
+     * the environment variable specified in VARNAME_CACHE_EXPIRATION,
+     * returns the value of CACHE_EXPIRY_DEFAULT_SECONDS as default if nothing is set.
+     *
+     * @return The cache expiration time to use for the rack id cache.
+     */
     private int getCacheExpiration() {
         String cacheExpirationConfigSeconds = System.getenv(VARNAME_CACHE_EXPIRATION);
         if (cacheExpirationConfigSeconds != null && cacheExpirationConfigSeconds != "") {
-            LOG.info("Found " + VARNAME_CACHE_EXPIRATION + "env var, changing cache time for topology entries.");
             try {
                 int cacheExpirationFromEnvVar = Integer.parseInt(cacheExpirationConfigSeconds);
+                LOG.info("Found " + VARNAME_CACHE_EXPIRATION + "env var, changing cache time for topology entries to " + cacheExpirationFromEnvVar + ".");
+                return cacheExpirationFromEnvVar;
             } catch (NumberFormatException e) {
-                LOG.warn("Unable to parse " + VARNAME_CACHE_EXPIRATION + " as integer, using default value: " + e.getLocalizedMessage());
+                LOG.warn("Unable to parse value of " + VARNAME_CACHE_EXPIRATION + "[" + cacheExpirationConfigSeconds + "] as integer, using default value: " + e.getLocalizedMessage());
             }
         }
         return CACHE_EXPIRY_DEFAULT_SECONDS;
     }
 
+    /***
+     *
+     * @param datanode
+     * @param podLabels
+     * @param nodeLabels
+     *
+     * @return
+     */
     private String getLabel(String datanode, Map<String, Map<String, String>> podLabels, Map<String, Map<String, String>> nodeLabels) {
         String result = new String();
 
@@ -170,7 +197,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         // it may (probably will) be possible that the namenode uses hostnames to resolve a datanode to a topology zone.
         // To allow this, we resolve every input to an ip address below and use the ip to lookup labels.
         // TODO: this might break with the listener operator, as `pod.status.podips` won't contain external addresses
-        //      tracking this in
+        //      tracking this in https://github.com/stackabletech/hdfs-topology-provider/issues/2
         InetAddress address = null;
         try {
             address = InetAddress.getByName(datanode);
@@ -194,7 +221,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         LOG.debug("Resolving nodes: " + names.toString());
 
         if (this.labels.size() == 0) {
-            LOG.warn("No topology labels defined, returning \"/defaultrack\" for all nodes.");
+            LOG.debug("No topology labels defined, returning \"/defaultrack\" for nodes: [" + names + "]");
             return names.stream().map(name -> "/defaultRack").collect(Collectors.toList());
         }
 
@@ -210,7 +237,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             // we'll simply refresh everything.
             LOG.debug("Cache doesn't contain values for all requested nodes, new values will be built for all nodes.");
         } else {
-            LOG.debug("Answering from cached topology keys.");
+            LOG.debug("Answering from cached topology keys: " + cachedValues);
             return cachedValues;
         }
 
@@ -294,7 +321,6 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
                 result.put(podIp.getIp(), nodeLabels);
             }
         }
-        this.LOG.warn(result.toString());
         return result;
     }
 

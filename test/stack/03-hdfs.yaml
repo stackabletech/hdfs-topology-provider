@@ -28,7 +28,6 @@ spec:
     productVersion: 3.3.6
     custom: hdfs
   clusterConfig:
-    listenerClass: external-unstable
     dfsReplication: 1
     zookeeperConfigMapName: simple-hdfs-znode
     authentication:

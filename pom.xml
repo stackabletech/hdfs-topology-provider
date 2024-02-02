@@ -60,6 +60,12 @@
       <artifactId>hadoop-common</artifactId>
       <version>${hadoop.version}</version>
       <scope>provided</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
@@ -166,6 +172,10 @@
                 <relocation>
                   <pattern>com.fasterxml</pattern>
                   <shadedPattern>org.shaded.fasterxml</shadedPattern>
+                </relocation>
+                <relocation>
+                  <pattern>io.fabric8</pattern>
+                  <shadedPattern>org.shaded.fabric8</shadedPattern>
                 </relocation>
               </relocations>
             </configuration>

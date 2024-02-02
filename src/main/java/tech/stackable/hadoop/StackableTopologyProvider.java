@@ -269,7 +269,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     List<Node> nodes = client.nodes().list().getItems();
     LOG.debug(
             "Retrieved nodes: "
-                    + pods.stream()
+                    + nodes.stream()
                     .map(
                             node -> {
                               return node.getMetadata().getName();

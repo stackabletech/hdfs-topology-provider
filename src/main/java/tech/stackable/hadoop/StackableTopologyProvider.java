@@ -44,25 +44,21 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     // Read the labels to be used to build a topology from environment variables
     // Labels are configured in the EnvVar "TOPOLOGY_LABELS".
     // They should be specified in the form "[node|pod]:<labelname>" and separated by ;
-    // So a valid configuration that reads topologyinformation from the labels "kubernetes.io/zone"
-    // and
-    // "kubernetes.io/rack" on the k8s node that is running a datanode pod would look like this:
-    // "node:kubernetes.io/zone;node:kubernetes.io/rack"
-    //
+    // So a valid configuration that reads topology information from the labels
+    // "kubernetes.io/zone" and "kubernetes.io/rack" on the k8s node that is running
+    // a datanode pod would look like this: "node:kubernetes.io/zone;node:kubernetes.io/rack"
     // By default, there is an upper limit of 2 on the number of labels that are processed, because
-    // this is what
-    // Hadoop traditionally allows - this can be overridden via setting the EnvVar
+    // this is what Hadoop traditionally allows - this can be overridden via setting the EnvVar
     // "MAX_TOPOLOGY_LEVELS".
     String topologyConfig = System.getenv(VARNAME_LABELS);
     if (topologyConfig != null && !"".equals(topologyConfig)) {
       String[] labelConfigs = topologyConfig.split(";");
       if (labelConfigs.length > getMaxLabels()) {
         LOG.error(
-            "Found ["
-                + labelConfigs.length
-                + "] topologylabels configured, but maximum allowed number is "
-                + getMaxLabels()
-                + "please check your config or raise the number of allowed labels.");
+            "Found [{}] topology labels configured, but maximum allowed number is [{}]: "
+                + "please check your config or raise the number of allowed labels.",
+            labelConfigs.length,
+            getMaxLabels());
         throw new RuntimeException();
       }
       // Create TopologyLabels from config strings
@@ -83,19 +79,23 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           .collect(Collectors.toList())
           .isEmpty()) {
         LOG.error(
-            "Topologylabel contained invalid configuration for at least one label, please double check your config!\nLabels should be specified in the format '[pod|node]:<labelname>;...'");
+            "Topologylabel contained invalid configuration for at least one label, "
+                + " double check your config!\n"
+                + "Labels should be specified in the format '[pod|node]:<labelname>;...'");
         throw new RuntimeException();
       }
 
     } else {
       LOG.error(
-          "Missing env var \""
-              + VARNAME_LABELS
-              + "\" this is required for rack awareness to work.");
+          "Missing env var [{}] this is required for rack awareness to work.", VARNAME_LABELS);
       throw new RuntimeException();
     }
     if (this.labels.isEmpty()) {
       LOG.info("No topology config found, defaulting value for all datanodes to \"/defaultRack/\"");
+    } else {
+      LOG.debug(
+          "Topology config yields labels [{}]",
+          this.labels.stream().map(label -> label.name).collect(Collectors.toList()));
     }
   }
 
@@ -112,20 +112,16 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       try {
         int maxLevelsFromEnvVar = Integer.parseInt(maxLevelsConfig);
         LOG.info(
-            "Found "
-                + VARNAME_MAXLEVELS
-                + " env var, changing allowed number of topology levels to "
-                + maxLevelsFromEnvVar
-                + ".");
+            "Found [{}] env var, changing allowed number of topology levels to [{}].",
+            VARNAME_MAXLEVELS,
+            maxLevelsFromEnvVar);
         return maxLevelsFromEnvVar;
       } catch (NumberFormatException e) {
         LOG.warn(
-            "Unable to parse value of "
-                + VARNAME_MAXLEVELS
-                + " ["
-                + maxLevelsConfig
-                + "] as integer, using default value: "
-                + e.getLocalizedMessage());
+            "Unable to parse value of [{}] [{}] as integer, using default value: [{}]",
+            VARNAME_MAXLEVELS,
+            maxLevelsConfig,
+            e.getLocalizedMessage());
       }
     }
     return MAX_LEVELS_DEFAULT;
@@ -144,20 +140,16 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       try {
         int cacheExpirationFromEnvVar = Integer.parseInt(cacheExpirationConfigSeconds);
         LOG.info(
-            "Found "
-                + VARNAME_CACHE_EXPIRATION
-                + "env var, changing cache time for topology entries to "
-                + cacheExpirationFromEnvVar
-                + ".");
+            "Found [{}] env var, changing cache time for topology entries to [{}].",
+            VARNAME_CACHE_EXPIRATION,
+            cacheExpirationFromEnvVar);
         return cacheExpirationFromEnvVar;
       } catch (NumberFormatException e) {
         LOG.warn(
-            "Unable to parse value of "
-                + VARNAME_CACHE_EXPIRATION
-                + "["
-                + cacheExpirationConfigSeconds
-                + "] as integer, using default value: "
-                + e.getLocalizedMessage());
+            "Unable to parse value of [{}]: [{}] as integer, using default value: [{}]",
+            VARNAME_CACHE_EXPIRATION,
+            cacheExpirationConfigSeconds,
+            e.getLocalizedMessage());
       }
     }
     return CACHE_EXPIRY_DEFAULT_SECONDS;
@@ -188,16 +180,17 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     InetAddress address = null;
     try {
       address = InetAddress.getByName(datanode);
-      LOG.debug("Resolved [" + datanode + "] to [" + address.getHostAddress() + "]");
+      LOG.debug("Resolved [{}] to [{}]", datanode, address.getHostAddress());
       datanode = address.getHostAddress();
     } catch (UnknownHostException e) {
       LOG.warn(
-          "failed to resolve address for ["
-              + datanode
-              + "] - this should not happen, defaulting this node to \"defaultRack\".");
+          "failed to resolve address for [{}]}] - this should not happen, "
+              + "defaulting this node to \"defaultRack\".",
+          datanode);
       return "/defaultRack";
     }
     for (TopologyLabel label : this.labels) {
+      LOG.debug("Looking for label [{}] of type [{}]", label.name, label.labelType);
       if (label.labelType == LabelType.Node) {
         result +=
             "/"
@@ -212,6 +205,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
                     .getOrDefault(label.name, "NotFound");
       }
     }
+    LOG.debug("Returning label [{}]", result);
     return result;
   }
 
@@ -220,8 +214,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     LOG.debug("Resolving nodes: " + names.toString());
 
     if (this.labels.isEmpty()) {
-      LOG.debug(
-          "No topology labels defined, returning \"/defaultrack\" for nodes: [" + names + "]");
+      LOG.debug("No topology labels defined, returning \"/defaultrack\" for nodes: [{}]", names);
       return names.stream().map(name -> "/defaultRack").collect(Collectors.toList());
     }
 
@@ -230,10 +223,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     // recalculate everything
     List<String> cachedValues =
         names.stream()
-            .map(
-                name -> {
-                  return this.topologyKeyCache.getIfPresent(name);
-                })
+            .map(name -> this.topologyKeyCache.getIfPresent(name))
             .collect(Collectors.toList());
 
     if (cachedValues.contains(null)) {
@@ -242,7 +232,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       LOG.debug(
           "Cache doesn't contain values for all requested nodes, new values will be built for all nodes.");
     } else {
-      LOG.debug("Answering from cached topology keys: " + cachedValues);
+      LOG.debug("Answering from cached topology keys: [{}]", cachedValues);
       return cachedValues;
     }
 
@@ -257,23 +247,13 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             .list()
             .getItems();
     LOG.debug(
-        "Retrieved dn pods: "
-            + pods.stream()
-                .map(
-                    pod -> {
-                      return pod.getMetadata().getName();
-                    })
-                .collect(Collectors.toList()));
+        "Retrieved dn pods: [{}]",
+        pods.stream().map(pod -> pod.getMetadata().getName()).collect(Collectors.toList()));
 
     List<Node> nodes = client.nodes().list().getItems();
     LOG.debug(
-        "Retrieved nodes: "
-            + nodes.stream()
-                .map(
-                    node -> {
-                      return node.getMetadata().getName();
-                    })
-                .collect(Collectors.toList()));
+        "Retrieved nodes: [{}]",
+        nodes.stream().map(node -> node.getMetadata().getName()).collect(Collectors.toList()));
 
     // Build internal state that is later used to look up information.
     // Basically this transposes pod and node lists into hashmaps where podips can be used to look
@@ -286,9 +266,11 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     // in memory for extended amounts of time.
     List<String> result = new ArrayList<>();
     Map<String, Map<String, String>> nodeLabels = getNodeLabels(pods, nodes);
-    LOG.debug("Resolved nodelabels for: " + nodeLabels.keySet().toString());
+    LOG.debug("Resolved node labels for [{}]", nodeLabels.keySet());
+    LOG.debug("Node labels values [{}]", nodeLabels.values());
     Map<String, Map<String, String>> podLabels = getPodLabels(pods);
-    LOG.debug("Resolved podlabels for " + podLabels.keySet().toString());
+    LOG.debug("Resolved pod labels for [{}]", podLabels.keySet());
+    LOG.debug("Pod labels values [{}]", podLabels.values());
 
     // Iterate over all nodes to resolve and return the topology zones
     for (String datanode : names) {
@@ -336,9 +318,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       Map<String, String> nodeLabels =
           nodes.stream()
               .filter(
-                  filterNode -> {
-                    return filterNode.getMetadata().getName().equals(pod.getSpec().getNodeName());
-                  })
+                  filterNode ->
+                      filterNode.getMetadata().getName().equals(pod.getSpec().getNodeName()))
               .collect(Collectors.toList())
               .get(0)
               .getMetadata()
@@ -397,9 +378,9 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       if (split.length != 2) {
         this.labelType = LabelType.Undefined;
         LOG.warn(
-            "Ignoring topology label ["
-                + value
-                + "] - label definitions need to be in the form of \"[node|pod]:<labelname>\"");
+            "Ignoring topology label [{}] - label definitions need to be in the form "
+                + "of \"[node|pod]:<labelname>\"",
+            value);
         return;
       }
       // Length has to be two, proceed with "normal" case
@@ -418,9 +399,9 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
         default:
           LOG.warn(
-              "Encountered unsupported labeltype ["
-                  + type
-                  + "] - this label definition will be ignored, supported types are [\"node\", \"pod\"]");
+              "Encountered unsupported label type [{}] - this label definition will be ignored, "
+                  + "supported types are [\"node\", \"pod\"]",
+              type);
           this.labelType = LabelType.Undefined;
       }
     }

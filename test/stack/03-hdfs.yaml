@@ -40,6 +40,9 @@ spec:
       kerberos:
         secretClass: kerberos-default
   nameNodes:
+    configOverrides: &configOverrides
+      core-site.xml:
+        hadoop.user.group.static.mapping.overrides: "dr.who=;nn=;nm=;jn=;testuser=supergroup;"
     roleGroups:
       default:
         replicas: 2
@@ -56,10 +59,12 @@ spec:
                   ROOT:
                     level: DEBUG
   dataNodes:
+    configOverrides: *configOverrides
     roleGroups:
       default:
         replicas: 1
   journalNodes:
+    configOverrides: *configOverrides
     roleGroups:
       default:
         replicas: 1

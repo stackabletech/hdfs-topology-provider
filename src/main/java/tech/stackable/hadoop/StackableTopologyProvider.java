@@ -31,12 +31,16 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   private static final int MAX_LEVELS_DEFAULT = 2;
   private static final int CACHE_EXPIRY_DEFAULT_SECONDS = 5 * 60;
   private final Logger LOG = LoggerFactory.getLogger(StackableTopologyProvider.class);
-  private KubernetesClient client;
-  private Cache<String, String> topologyKeyCache =
+  private final KubernetesClient client;
+  private final Cache<String, String> topologyKeyCache =
       Caffeine.newBuilder().expireAfterWrite(getCacheExpiration(), TimeUnit.SECONDS).build();
+  private final Cache<String, Node> nodeKeyCache =
+      Caffeine.newBuilder()
+          .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
+          .build();
   // The list of labels that this provider uses to generate the topologyinformation for any given
   // datanode
-  private List<TopologyLabel> labels;
+  private final List<TopologyLabel> labels;
 
   public StackableTopologyProvider() {
     this.client = new DefaultKubernetesClient();
@@ -177,7 +181,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     // TODO: this might break with the listener operator, as `pod.status.podips` won't contain
     // external addresses
     //      tracking this in https://github.com/stackabletech/hdfs-topology-provider/issues/2
-    InetAddress address = null;
+    InetAddress address;
     try {
       address = InetAddress.getByName(datanode);
       LOG.debug("Resolved [{}] to [{}]", datanode, address.getHostAddress());
@@ -190,14 +194,25 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       return "/defaultRack";
     }
     for (TopologyLabel label : this.labels) {
-      LOG.debug("Looking for label [{}] of type [{}]", label.name, label.labelType);
       if (label.labelType == LabelType.Node) {
+        LOG.debug(
+            "Looking for node label [{}] of type [{}] in [{}]/[{}]",
+            label.name,
+            label.labelType,
+            nodeLabels.keySet(),
+            nodeLabels.values());
         result +=
             "/"
                 + nodeLabels
                     .getOrDefault(datanode, new HashMap<>())
                     .getOrDefault(label.name, "NotFound");
       } else if (label.labelType == LabelType.Pod) {
+        LOG.debug(
+            "Looking for pod label [{}] of type [{}] in [{}]/[{}]",
+            label.name,
+            label.labelType,
+            podLabels.keySet(),
+            podLabels.values());
         result +=
             "/"
                 + podLabels
@@ -211,10 +226,11 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
   @Override
   public List<String> resolve(List<String> names) {
-    LOG.debug("Resolving nodes: " + names.toString());
+    LOG.debug("Resolving for hdfs nodes: " + names.toString());
 
     if (this.labels.isEmpty()) {
-      LOG.debug("No topology labels defined, returning \"/defaultrack\" for nodes: [{}]", names);
+      LOG.debug(
+          "No topology labels defined, returning \"/defaultrack\" for hdfs nodes: [{}]", names);
       return names.stream().map(name -> "/defaultRack").collect(Collectors.toList());
     }
 
@@ -225,12 +241,13 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         names.stream()
             .map(name -> this.topologyKeyCache.getIfPresent(name))
             .collect(Collectors.toList());
+    LOG.debug("Cached Values: " + cachedValues);
 
     if (cachedValues.contains(null)) {
       // We cannot completely serve this request from the cache, since we need to talk to k8s anyway
       // we'll simply refresh everything.
       LOG.debug(
-          "Cache doesn't contain values for all requested nodes, new values will be built for all nodes.");
+          "Cache doesn't contain values for all requested hdfs nodes, new values will be built for all nodes.");
     } else {
       LOG.debug("Answering from cached topology keys: [{}]", cachedValues);
       return cachedValues;
@@ -250,27 +267,19 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         "Retrieved dn pods: [{}]",
         pods.stream().map(pod -> pod.getMetadata().getName()).collect(Collectors.toList()));
 
-    List<Node> nodes = client.nodes().list().getItems();
-    LOG.debug(
-        "Retrieved nodes: [{}]",
-        nodes.stream().map(node -> node.getMetadata().getName()).collect(Collectors.toList()));
-
     // Build internal state that is later used to look up information.
     // Basically this transposes pod and node lists into hashmaps where podips can be used to look
-    // up
-    // labels for the pods and nodes
+    // up labels for the pods and nodes.
     // This is not terribly memory efficient because it effectively duplicates a lot of data in
-    // memory.
-    // But since we cache lookups, this should hopefully only be done every once in a while and is
-    // not kept
-    // in memory for extended amounts of time.
+    // memory. But since we cache lookups, this should hopefully only be done every once in a while
+    // and is not kept in memory for extended amounts of time.
     List<String> result = new ArrayList<>();
-    Map<String, Map<String, String>> nodeLabels = getNodeLabels(pods, nodes);
-    LOG.debug("Resolved node labels for [{}]", nodeLabels.keySet());
-    LOG.debug("Node labels values [{}]", nodeLabels.values());
+
+    Map<String, Map<String, String>> nodeLabels = getNodeLabels(pods);
+    LOG.debug("Resolved node labels map [{}]/[{}]", nodeLabels.keySet(), nodeLabels.values());
+
     Map<String, Map<String, String>> podLabels = getPodLabels(pods);
-    LOG.debug("Resolved pod labels for [{}]", podLabels.keySet());
-    LOG.debug("Pod labels values [{}]", podLabels.values());
+    LOG.debug("Resolved pod labels map [{}]/[{}]", podLabels.keySet(), podLabels.values());
 
     // Iterate over all nodes to resolve and return the topology zones
     for (String datanode : names) {
@@ -308,24 +317,25 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
    * labels that are attached to the "physical" node running the pod that this ip belongs to.
    *
    * @param pods List of all in-scope pods (datanode pods in this namespace)
-   * @param nodes List of all nodes running datanode pods (will effectively mean "all nodes")
    * @return Map of ip addresses to labels of the node running the pod that the ip address belongs
    *     to
    */
-  private Map<String, Map<String, String>> getNodeLabels(List<Pod> pods, List<Node> nodes) {
+  private Map<String, Map<String, String>> getNodeLabels(List<Pod> pods) {
     Map<String, Map<String, String>> result = new HashMap<>();
     for (Pod pod : pods) {
-      Map<String, String> nodeLabels =
-          nodes.stream()
-              .filter(
-                  filterNode ->
-                      filterNode.getMetadata().getName().equals(pod.getSpec().getNodeName()))
-              .collect(Collectors.toList())
-              .get(0)
-              .getMetadata()
-              .getLabels();
+      // either retrieve the node from the internal cache or fetch it by name
+      String nodeName = pod.getSpec().getNodeName();
+      Node node = this.nodeKeyCache.getIfPresent(nodeName);
+      if (node == null) {
+        LOG.debug("Node not yet cached, fetching by name [{}]", nodeName);
+        node = client.nodes().withName(nodeName).get();
+      }
+
+      Map<String, String> nodeLabels = node.getMetadata().getLabels();
+      LOG.debug("Labels for node [{}]:[{}]....", nodeName, nodeLabels);
 
       for (PodIP podIp : pod.getStatus().getPodIPs()) {
+        LOG.debug("...assigned to IP [{}]", podIp.getIp());
         result.put(podIp.getIp(), nodeLabels);
       }
     }
@@ -357,8 +367,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   }
 
   private class TopologyLabel {
-    LabelType labelType;
-    String name = null;
+    private final LabelType labelType;
+    private String name = null;
 
     /**
      * Create a new TopologyLabel from its string representation
@@ -366,7 +376,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
      * @param value A string in the form of "[node|pod]:<labelname>" that is deserialized into a
      *     TopologyLabel. Invalid and empty strings are resolved into the type unspecified.
      */
-    public TopologyLabel(String value) {
+    private TopologyLabel(String value) {
       // If this is null the env var was not set, we will return 'undefined' for this level
       if (value == null || value.isEmpty()) {
         this.labelType = LabelType.Undefined;

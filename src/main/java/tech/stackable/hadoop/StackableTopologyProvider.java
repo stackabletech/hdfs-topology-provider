@@ -329,6 +329,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       if (node == null) {
         LOG.debug("Node not yet cached, fetching by name [{}]", nodeName);
         node = client.nodes().withName(nodeName).get();
+        this.nodeKeyCache.put(nodeName, node);
       }
 
       Map<String, String> nodeLabels = node.getMetadata().getLabels();

@@ -26,7 +26,8 @@ metadata:
 spec:
   image:
     productVersion: 3.3.6
-    custom: hdfs
+    custom: docker.stackable.tech/stackable/hadoop-with-topology-provider:3.3.6-stackable0.0.0-dev
+    pullPolicy: IfNotPresent
   clusterConfig:
     dfsReplication: 1
     zookeeperConfigMapName: simple-hdfs-znode
@@ -46,18 +47,6 @@ spec:
     roleGroups:
       default:
         replicas: 2
-        config:
-          logging:
-            enableVectorAgent: false
-            containers:
-              hdfs:
-                console:
-                  level: DEBUG
-                file:
-                  level: DEBUG
-                loggers:
-                  ROOT:
-                    level: DEBUG
   dataNodes:
     configOverrides: *configOverrides
     roleGroups:

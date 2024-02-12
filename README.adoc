@@ -15,7 +15,7 @@ From this state store the tool can then calculate rack IDs for nodes that HDFS a
 
 Results are cached for a configurable amount of time and served from the cache if present.
 
-In a Kuberentes environment it is likely that the majority of requests will not come from the datanodes themselves, but rather from other processes such as Spark executors writing data to HDFS. In such cases the calling routine provides the IP addresses of whichever pods are doing the writing. If a datanode resides on the same Kubernetes node as one of these pods, then this datanode is used for label resolution for that pod.
+In a Kubernetes environment it is likely that the majority of writes will not come from the DataNodes themselves, but rather from other processes such as Spark executors writing data to HDFS. The NameNode passes these on to the topology provider to request the rack ID i.e. it provides the IP addresses of whichever pods are doing the writing. If a datanode resides on the same Kubernetes node as one of these pods, then this datanode is used for label resolution for that pod.
 
 ## Configuration
 

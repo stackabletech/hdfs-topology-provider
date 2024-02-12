@@ -19,44 +19,44 @@ spec:
     - "10M"
     - "hdfs://simple-hdfs/user/stackable/teragen_output"
   sparkConf:
-     "spark.driver.extraClassPath": "/etc/hadoop/conf/:/stackable/spark/extra-jars/*"
-     "spark.executor.extraClassPath": "/etc/hadoop/conf/:/stackable/spark/extra-jars/*"
-     "spark.kerberos.keytab": "/stackable/kerberos/keytab"
-     "spark.kerberos.principal": "testuser/spark-teragen.default.svc.cluster.local@CLUSTER.LOCAL"
-     "spark.driver.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
-     "spark.executor.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
+    "spark.driver.extraClassPath": "/etc/hadoop/conf/:/stackable/spark/extra-jars/*"
+    "spark.executor.extraClassPath": "/etc/hadoop/conf/:/stackable/spark/extra-jars/*"
+    "spark.kerberos.keytab": "/stackable/kerberos/keytab"
+    "spark.kerberos.principal": "testuser/spark-teragen.default.svc.cluster.local@CLUSTER.LOCAL"
+    "spark.driver.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
+    "spark.executor.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
   job:
     podOverrides:
       spec:
         volumes:
-        - name: hdfs-config
-          configMap:
-            name: simple-hdfs-kerberos
-        - name: kerberos-config
-          configMap:
-            name: krb5-kdc
-        - name: kerberos
-          ephemeral:
-            volumeClaimTemplate:
-              metadata:
-                annotations:
-                  secrets.stackable.tech/class: kerberos-default
-                  secrets.stackable.tech/scope: service=spark-teragen
-                  secrets.stackable.tech/kerberos.service.names: testuser
-              spec:
-                storageClassName: secrets.stackable.tech
-                accessModes:
-                  - ReadWriteOnce
-                resources:
-                  requests:
-                    storage: "1"
-        containers:
-        - name: spark-submit
-          volumeMounts:
           - name: hdfs-config
-            mountPath: /etc/hadoop/conf
+            configMap:
+              name: simple-hdfs-kerberos
+          - name: kerberos-config
+            configMap:
+              name: krb5-kdc
           - name: kerberos
-            mountPath: /stackable/kerberos
+            ephemeral:
+              volumeClaimTemplate:
+                metadata:
+                  annotations:
+                    secrets.stackable.tech/class: kerberos-default
+                    secrets.stackable.tech/scope: service=spark-teragen
+                    secrets.stackable.tech/kerberos.service.names: testuser
+                spec:
+                  storageClassName: secrets.stackable.tech
+                  accessModes:
+                    - ReadWriteOnce
+                  resources:
+                    requests:
+                      storage: "1"
+        containers:
+          - name: spark-submit
+            volumeMounts:
+            - name: hdfs-config
+              mountPath: /etc/hadoop/conf
+            - name: kerberos
+              mountPath: /stackable/kerberos
   driver:
     config:
       volumeMounts:

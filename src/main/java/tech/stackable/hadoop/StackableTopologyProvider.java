@@ -45,15 +45,14 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   public StackableTopologyProvider() {
     this.client = new DefaultKubernetesClient();
 
-    // Read the labels to be used to build a topology from environment variables
-    // Labels are configured in the EnvVar "TOPOLOGY_LABELS".
-    // They should be specified in the form "[node|pod]:<labelname>" and separated by ;
-    // So a valid configuration that reads topology information from the labels
-    // "kubernetes.io/zone" and "kubernetes.io/rack" on the k8s node that is running
-    // a datanode pod would look like this: "node:kubernetes.io/zone;node:kubernetes.io/rack"
-    // By default, there is an upper limit of 2 on the number of labels that are processed, because
-    // this is what Hadoop traditionally allows - this can be overridden via setting the EnvVar
-    // "MAX_TOPOLOGY_LEVELS".
+    // Read the labels to be used to build a topology from environment variables. Labels are
+    // configured in the EnvVar "TOPOLOGY_LABELS". They should be specified in the form
+    // "[node|pod]:<labelname>" and separated by ";". So a valid configuration that reads topology
+    // information from the labels "kubernetes.io/zone" and "kubernetes.io/rack" on the k8s node
+    // that is running a datanode pod would look like this:
+    // "node:kubernetes.io/zone;node:kubernetes.io/rack" By default, there is an upper limit of 2 on
+    // the number of labels that are processed, because this is what Hadoop traditionally allows -
+    // this can be overridden via setting the EnvVar "MAX_TOPOLOGY_LEVELS".
     String topologyConfig = System.getenv(VARNAME_LABELS);
     if (topologyConfig != null && !"".equals(topologyConfig)) {
       String[] labelConfigs = topologyConfig.split(";");
@@ -174,10 +173,9 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     String result = new String();
 
     // The internal structures used by this mapper are all based on IP addresses. Depending on
-    // configuration and network setup
-    // it may (probably will) be possible that the namenode uses hostnames to resolve a datanode to
-    // a topology zone.
-    // To allow this, we resolve every input to an ip address below and use the ip to lookup labels.
+    // configuration and network setup it may (probably will) be possible that the namenode uses
+    // hostnames to resolve a datanode to a topology zone. To allow this, we resolve every input to
+    // an ip address below and use the ip to lookup labels.
     // TODO: this might break with the listener operator, as `pod.status.podips` won't contain
     // external addresses
     //      tracking this in https://github.com/stackabletech/hdfs-topology-provider/issues/2
@@ -226,10 +224,10 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
   @Override
   public List<String> resolve(List<String> names) {
-    LOG.debug("Resolving for hdfs nodes: " + names.toString());
+    LOG.info("Resolving for pods [{}]", names.toString());
 
     if (this.labels.isEmpty()) {
-      LOG.debug(
+      LOG.info(
           "No topology labels defined, returning \"/defaultrack\" for hdfs nodes: [{}]", names);
       return names.stream().map(name -> "/defaultRack").collect(Collectors.toList());
     }
@@ -241,22 +239,20 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         names.stream()
             .map(name -> this.topologyKeyCache.getIfPresent(name))
             .collect(Collectors.toList());
-    LOG.debug("Cached Values: " + cachedValues);
+    LOG.debug("Cached Values [{}]", cachedValues);
 
     if (cachedValues.contains(null)) {
       // We cannot completely serve this request from the cache, since we need to talk to k8s anyway
       // we'll simply refresh everything.
       LOG.debug(
-          "Cache doesn't contain values for all requested hdfs nodes, new values will be built for all nodes.");
+          "Cache doesn't contain values for all requested pods: new values will be built for all nodes.");
     } else {
-      LOG.debug("Answering from cached topology keys: [{}]", cachedValues);
+      LOG.info("Answering from cached topology keys: [{}]", cachedValues);
       return cachedValues;
     }
 
-    // Retrieve all datanode pods. This should be restricted to the current namespace by the
-    // serviceaccount
-    // we roll out in our helm charts anyway, so it is not further contained here.
-    List<Pod> pods =
+    // The datanodes will be the cache keys.
+    List<Pod> datanodes =
         client
             .pods()
             .withLabel("app.kubernetes.io/component", "datanode")
@@ -264,46 +260,102 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             .list()
             .getItems();
     LOG.debug(
-        "Retrieved dn pods: [{}]",
-        pods.stream().map(pod -> pod.getMetadata().getName()).collect(Collectors.toList()));
+        "Retrieved datanodes: [{}]",
+        datanodes.stream()
+            .map(datanode -> datanode.getMetadata().getName())
+            .collect(Collectors.toList()));
 
-    // Build internal state that is later used to look up information.
-    // Basically this transposes pod and node lists into hashmaps where podips can be used to look
-    // up labels for the pods and nodes.
-    // This is not terribly memory efficient because it effectively duplicates a lot of data in
-    // memory. But since we cache lookups, this should hopefully only be done every once in a while
-    // and is not kept in memory for extended amounts of time.
+    // Build internal state that is later used to look up information. Basically this transposes pod
+    // and node lists into hashmaps where pod-IPs can be used to look up labels for the pods and
+    // nodes. This is not terribly memory efficient because it effectively duplicates a lot of data
+    // in memory. But since we cache lookups, this should hopefully only be done every once in a
+    // while and is not kept in memory for extended amounts of time.
     List<String> result = new ArrayList<>();
 
-    Map<String, Map<String, String>> nodeLabels = getNodeLabels(pods);
+    Map<String, Map<String, String>> nodeLabels = getNodeLabels(datanodes);
     LOG.debug("Resolved node labels map [{}]/[{}]", nodeLabels.keySet(), nodeLabels.values());
 
-    Map<String, Map<String, String>> podLabels = getPodLabels(pods);
+    Map<String, Map<String, String>> podLabels = getPodLabels(datanodes);
     LOG.debug("Resolved pod labels map [{}]/[{}]", podLabels.keySet(), podLabels.values());
 
+    names = resolveDataNodesFromCallingPods(names, podLabels, datanodes);
+
     // Iterate over all nodes to resolve and return the topology zones
-    for (String datanode : names) {
-      String builtLabel = getLabel(datanode, podLabels, nodeLabels);
+    for (String pod : names) {
+      String builtLabel = getLabel(pod, podLabels, nodeLabels);
       result.add(builtLabel);
 
       // Cache the value for potential use in a later request
-      this.topologyKeyCache.put(datanode, builtLabel);
+      this.topologyKeyCache.put(pod, builtLabel);
     }
+    LOG.info("Returning resolved labels [{}]", result);
     return result;
   }
 
   /**
-   * Given a list of Pods, return a HashMap that maps pod ips onto Pod labels. The returned Map may
-   * contain more entries than the list that is given to this function, as an entry will be
+   * The list of names may be datanodes (as is the case when the topology is initialised) or
+   * non-datanodes, when the data is being written by a client tool, spark executors etc. In this
+   * case we want to identify the datanodes that are running on the same node as this client. The
+   * names may also be pod IPs or pod names.
+   *
+   * @param names list of client pods to resolve to datanodes
+   * @param podLabels map of podIPs and labels
+   * @param dns list of datanode nameswhich will be used to match nodenames
+   * @return
+   */
+  private List<String> resolveDataNodesFromCallingPods(
+      List<String> names, Map<String, Map<String, String>> podLabels, List<Pod> dns) {
+    List<String> dataNodes = new LinkedList<>();
+    for (String name : names) {
+      // if we don't find a dataNode running on the same node as a non-dataNode pod, then
+      // we'll keep the original name to allow it to be resolved to NotFound in the calling routine.
+      String replacementDataNodeIp = name;
+      InetAddress address;
+      try {
+        // make sure we are looking up using the IP address
+        address = InetAddress.getByName(name);
+        String podIp = address.getHostAddress();
+        if (podLabels.containsKey(podIp)) {
+          replacementDataNodeIp = podIp;
+          LOG.info("added as found in the datanode map [{}]", podIp);
+        } else {
+          // we've received a call from a non-datanode pod
+          List<Pod> pods = client.pods().list().getItems();
+          for (Pod pod : pods) {
+            if (pod.getStatus().getPodIP().equals(podIp)) {
+              String nodeName = pod.getSpec().getNodeName();
+              for (Pod dn : dns) {
+                if (dn.getSpec().getNodeName().equals(nodeName)) {
+                  LOG.debug(
+                      "nodeName [{}] matches with [{}]?", dn.getSpec().getNodeName(), nodeName);
+                  replacementDataNodeIp = dn.getStatus().getPodIP();
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (UnknownHostException e) {
+        LOG.warn("error encounter [{}]", e.getLocalizedMessage());
+      }
+      dataNodes.add(replacementDataNodeIp);
+    }
+    LOG.info("Replacing names [{}] with IPs [{}]", names, dataNodes);
+    return dataNodes;
+  }
+
+  /**
+   * Given a list of datanodes, return a HashMap that maps pod ips onto Pod labels. The returned Map
+   * may contain more entries than the list that is given to this function, as an entry will be
    * generated for every ip a pod has.
    *
-   * @param pods List of all retrieved pods.
+   * @param datanodes List of all retrieved pods.
    * @return Map of ip addresses to all labels the pod that "owns" that ip has attached to itself
    */
-  private Map<String, Map<String, String>> getPodLabels(List<Pod> pods) {
+  private Map<String, Map<String, String>> getPodLabels(List<Pod> datanodes) {
     Map<String, Map<String, String>> result = new HashMap<>();
     // Iterate over all pods and then all ips for every pod and add these to the mapping
-    for (Pod pod : pods) {
+    for (Pod pod : datanodes) {
       for (PodIP podIp : pod.getStatus().getPodIPs()) {
         result.put(podIp.getIp(), pod.getMetadata().getLabels());
       }
@@ -312,17 +364,18 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   }
 
   /**
-   * Given lists of pods and nodes this function will resolve which pods run on which node as well
-   * as all the ips assigned to a pod. It will then return a mapping of every ip address to the
-   * labels that are attached to the "physical" node running the pod that this ip belongs to.
+   * Given a list of datanodes this function will resolve which datanodes run on which node as well
+   * as all the ips assigned to a datanodes. It will then return a mapping of every ip address to
+   * the labels that are attached to the "physical" node running the datanodes that this ip belongs
+   * to.
    *
-   * @param pods List of all in-scope pods (datanode pods in this namespace)
+   * @param datanodes List of all in-scope datanodes (datanode pods in this namespace)
    * @return Map of ip addresses to labels of the node running the pod that the ip address belongs
    *     to
    */
-  private Map<String, Map<String, String>> getNodeLabels(List<Pod> pods) {
+  private Map<String, Map<String, String>> getNodeLabels(List<Pod> datanodes) {
     Map<String, Map<String, String>> result = new HashMap<>();
-    for (Pod pod : pods) {
+    for (Pod pod : datanodes) {
       // either retrieve the node from the internal cache or fetch it by name
       String nodeName = pod.getSpec().getNodeName();
       Node node = this.nodeKeyCache.getIfPresent(nodeName);

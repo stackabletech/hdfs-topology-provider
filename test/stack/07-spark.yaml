@@ -53,10 +53,10 @@ spec:
         containers:
           - name: spark-submit
             volumeMounts:
-            - name: hdfs-config
-              mountPath: /etc/hadoop/conf
-            - name: kerberos
-              mountPath: /stackable/kerberos
+              - name: hdfs-config
+                mountPath: /etc/hadoop/conf
+              - name: kerberos
+                mountPath: /stackable/kerberos
   driver:
     config:
       volumeMounts:

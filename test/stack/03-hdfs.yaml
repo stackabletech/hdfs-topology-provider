@@ -51,7 +51,7 @@ spec:
     configOverrides: *configOverrides
     roleGroups:
       default:
-        replicas: 1
+        replicas: 3
   journalNodes:
     configOverrides: *configOverrides
     roleGroups:

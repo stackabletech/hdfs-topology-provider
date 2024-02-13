@@ -28,6 +28,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   public static final String VARNAME_LABELS = "TOPOLOGY_LABELS";
   public static final String VARNAME_CACHE_EXPIRATION = "TOPOLOGY_CACHE_EXPIRATION_SECONDS";
   public static final String VARNAME_MAXLEVELS = "TOPOLOGY_MAX_LEVELS";
+  public static final String DEFAULT_RACK = "/defaultRack";
   private static final int MAX_LEVELS_DEFAULT = 2;
   private static final int CACHE_EXPIRY_DEFAULT_SECONDS = 5 * 60;
   private final Logger LOG = LoggerFactory.getLogger(StackableTopologyProvider.class);
@@ -86,7 +87,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       throw new RuntimeException();
     }
     if (this.labels.isEmpty()) {
-      LOG.info("No topology config found, defaulting value for all datanodes to \"/defaultRack/\"");
+      LOG.info(
+          "No topology config found, defaulting value for all datanodes to [{}]", DEFAULT_RACK);
     } else {
       LOG.debug(
           "Topology config yields labels [{}]",
@@ -176,10 +178,11 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       datanode = address.getHostAddress();
     } catch (UnknownHostException e) {
       LOG.warn(
-          "failed to resolve address for [{}]}] - this should not happen, "
-              + "defaulting this node to \"defaultRack\".",
-          datanode);
-      return "/defaultRack";
+          "failed to resolve address for [{}] - this should not happen, "
+              + "defaulting this node to [{}]",
+          datanode,
+          DEFAULT_RACK);
+      return DEFAULT_RACK;
     }
     StringBuilder resultBuilder = new StringBuilder(new String());
     for (TopologyLabel label : this.labels) {
@@ -222,8 +225,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
     if (this.labels.isEmpty()) {
       LOG.info(
-          "No topology labels defined, returning \"/defaultrack\" for hdfs nodes: [{}]", names);
-      return names.stream().map(name -> "/defaultRack").collect(Collectors.toList());
+          "No topology labels defined, returning [{}] for hdfs nodes: [{}]", DEFAULT_RACK, names);
+      return names.stream().map(name -> DEFAULT_RACK).collect(Collectors.toList());
     }
 
     // We need to check if we have cached values for all datanodes contained in this request.

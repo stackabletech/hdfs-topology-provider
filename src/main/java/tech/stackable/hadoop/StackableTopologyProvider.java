@@ -74,9 +74,9 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           .collect(Collectors.toList())
           .isEmpty()) {
         LOG.error(
-            "Topologylabel contained invalid configuration for at least one label, "
-                + " double check your config!\n"
-                + "Labels should be specified in the format '[pod|node]:<labelname>;...'");
+            "Topologylabel contained invalid configuration for at least one label: "
+                + "double check your config! Labels should be specified in the "
+                + "format '[pod|node]:<labelname>;...'");
         throw new RuntimeException();
       }
 

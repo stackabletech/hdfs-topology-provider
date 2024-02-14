@@ -379,6 +379,12 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     for (Pod pod : datanodes) {
       // either retrieve the node from the internal cache or fetch it by name
       String nodeName = pod.getSpec().getNodeName();
+      // nodeName may be null while pod is being provisioned so force a re-try
+      if (nodeName == null) {
+        LOG.warn(
+            "Pod [{}] not yet assigned to a k8s node, forcing re-try", pod.getMetadata().getName());
+        return result;
+      }
       Node node = this.nodeKeyCache.getIfPresent(nodeName);
       if (node == null) {
         LOG.debug("Node not yet cached, fetching by name [{}]", nodeName);

@@ -70,10 +70,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           Arrays.stream(labelConfigs).map(TopologyLabel::new).collect(Collectors.toList());
 
       // Check if any labelConfigs were invalid
-      if (!this.labels.stream()
-          .filter(label -> label.labelType == LabelType.Undefined)
-          .collect(Collectors.toList())
-          .isEmpty()) {
+      if (!(this.labels.stream().filter(label -> label.labelType == LabelType.Undefined).count()
+          == 0)) {
         LOG.error(
             "Topologylabel contained invalid configuration for at least one label: "
                 + "double check your config! Labels should be specified in the "
@@ -184,7 +182,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           DEFAULT_RACK);
       return DEFAULT_RACK;
     }
-    StringBuilder resultBuilder = new StringBuilder(new String());
+    StringBuilder resultBuilder = new StringBuilder("");
     for (TopologyLabel label : this.labels) {
       if (label.labelType == LabelType.Node) {
         LOG.debug(

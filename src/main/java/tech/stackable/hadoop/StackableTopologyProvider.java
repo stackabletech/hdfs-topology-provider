@@ -270,15 +270,27 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     Map<String, Map<String, String>> podLabels = getPodLabels(datanodes);
     LOG.debug("Resolved pod labels map [{}]/[{}]", podLabels.keySet(), podLabels.values());
 
-    names = resolveDataNodesFromCallingPods(names, podLabels, datanodes);
+    List<String> newNames = resolveDataNodesFromCallingPods(names, podLabels, datanodes);
 
     // Iterate over all nodes to resolve and return the topology zones
-    for (String pod : names) {
-      String builtLabel = getLabel(pod, podLabels, nodeLabels);
+    for (int i = 0; i < names.size(); i++) {
+      String builtLabel = getLabel(newNames.get(i), podLabels, nodeLabels);
       result.add(builtLabel);
 
       // Cache the value for potential use in a later request
-      this.topologyKeyCache.put(pod, builtLabel);
+      // The `if` here is useless, mostly there to illustrate the point..
+      if (names.get(i) != newNames.get(i)) {
+        // ip is not the same, so it was replaced with a datanode ip for the lookup
+        // if we cache the original ip, the next time it connects we'll not have to
+        // do the replacing song and dance
+        this.topologyKeyCache.put(names.get(i), builtLabel);
+      } else {
+        // name was not replaced, so we can cache the new value
+        // functionally this is entire `if` can be removed and we can just
+        // cache the old value in every case, as this would effectively be
+        // the same effect - I have split it up here to illustrate the idea
+        this.topologyKeyCache.put(newNames.get(i), builtLabel);
+      }
     }
     LOG.info("Returning resolved labels [{}]", result);
     return result;

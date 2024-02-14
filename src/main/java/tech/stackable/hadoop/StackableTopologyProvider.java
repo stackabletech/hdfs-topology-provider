@@ -90,7 +90,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       LOG.info(
           "No topology config found, defaulting value for all datanodes to [{}]", DEFAULT_RACK);
     } else {
-      LOG.debug(
+      LOG.info(
           "Topology config yields labels [{}]",
           this.labels.stream().map(label -> label.name).collect(Collectors.toList()));
     }
@@ -109,16 +109,16 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       try {
         int maxLevelsFromEnvVar = Integer.parseInt(maxLevelsConfig);
         LOG.info(
-            "Found [{}] env var, changing allowed number of topology levels to [{}].",
+            "Found [{}] env var, changing allowed number of topology levels to [{}]",
             VARNAME_MAXLEVELS,
             maxLevelsFromEnvVar);
         return maxLevelsFromEnvVar;
       } catch (NumberFormatException e) {
         LOG.warn(
-            "Unable to parse value of [{}] [{}] as integer, using default value: [{}]",
+            "Unable to parse value of [{}]/[{}] as integer, using default value [{}]",
             VARNAME_MAXLEVELS,
             maxLevelsConfig,
-            e.getLocalizedMessage());
+            MAX_LEVELS_DEFAULT);
       }
     }
     return MAX_LEVELS_DEFAULT;
@@ -137,16 +137,16 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       try {
         int cacheExpirationFromEnvVar = Integer.parseInt(cacheExpirationConfigSeconds);
         LOG.info(
-            "Found [{}] env var, changing cache time for topology entries to [{}].",
+            "Found [{}] env var, changing cache time for topology entries to [{}]",
             VARNAME_CACHE_EXPIRATION,
             cacheExpirationFromEnvVar);
         return cacheExpirationFromEnvVar;
       } catch (NumberFormatException e) {
         LOG.warn(
-            "Unable to parse value of [{}]: [{}] as integer, using default value: [{}]",
+            "Unable to parse value of [{}]/[{}] as integer, using default value [{}]",
             VARNAME_CACHE_EXPIRATION,
             cacheExpirationConfigSeconds,
-            e.getLocalizedMessage());
+            CACHE_EXPIRY_DEFAULT_SECONDS);
       }
     }
     return CACHE_EXPIRY_DEFAULT_SECONDS;
@@ -234,7 +234,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     // recalculate everything
     List<String> cachedValues =
         names.stream().map(this.topologyKeyCache::getIfPresent).collect(Collectors.toList());
-    LOG.debug("Cached Values [{}]", cachedValues);
+    LOG.debug("Cached topologyKeyCache values [{}]", cachedValues);
 
     if (cachedValues.contains(null)) {
       // We cannot completely serve this request from the cache, since we need to talk to k8s anyway
@@ -242,7 +242,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       LOG.debug(
           "Cache doesn't contain values for all requested pods: new values will be built for all nodes.");
     } else {
-      LOG.info("Answering from cached topology keys: [{}]", cachedValues);
+      LOG.debug("Answering from cached topology keys: [{}]", cachedValues);
       return cachedValues;
     }
 
@@ -301,6 +301,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   private List<String> resolveDataNodesFromCallingPods(
       List<String> names, Map<String, Map<String, String>> podLabels, List<Pod> dns) {
     List<String> dataNodes = new LinkedList<>();
+    List<Pod> pods = new LinkedList<>();
+
     for (String name : names) {
       // if we don't find a dataNode running on the same node as a non-dataNode pod, then
       // we'll keep the original name to allow it to be resolved to NotFound in the calling routine.
@@ -314,10 +316,14 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           replacementDataNodeIp = podIp;
           LOG.info("added as found in the datanode map [{}]", podIp);
         } else {
-          // we've received a call from a non-datanode pod
-          List<Pod> pods = client.pods().list().getItems();
+          // we've received a call from a non-datanode pod.
+          // Only calls pods once per function call, but then only if we have a non-datanode.
+          // TODO cache pods so that multiple calls can benefit from cached values.
+          if (pods.isEmpty()) {
+            pods = client.pods().list().getItems();
+          }
           for (Pod pod : pods) {
-            if (pod.getStatus().getPodIP().equals(podIp)) {
+            if (pod.getStatus().getPodIPs().contains(new PodIP(podIp))) {
               String nodeName = pod.getSpec().getNodeName();
               for (Pod dn : dns) {
                 if (dn.getSpec().getNodeName().equals(nodeName)) {

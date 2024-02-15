@@ -70,7 +70,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           Arrays.stream(labelConfigs).map(TopologyLabel::new).collect(Collectors.toList());
 
       // Check if any labelConfigs were invalid
-      if (!(this.labels.stream().noneMatch(label -> label.labelType == LabelType.Undefined))) {
+      if (!this.labels.stream().noneMatch(label -> label.labelType == LabelType.Undefined)) {
         LOG.error(
             "Topologylabel contained invalid configuration for at least one label: "
                 + "double check your config! Labels should be specified in the "
@@ -270,15 +270,19 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     Map<String, Map<String, String>> podLabels = getPodLabels(datanodes);
     LOG.debug("Resolved pod labels map [{}]/[{}]", podLabels.keySet(), podLabels.values());
 
-    names = resolveDataNodesFromCallingPods(names, podLabels, datanodes);
+    List<String> podsResolvedToDataNodes =
+        resolveDataNodesFromCallingPods(names, podLabels, datanodes);
 
     // Iterate over all nodes to resolve and return the topology zones
-    for (String pod : names) {
-      String builtLabel = getLabel(pod, podLabels, nodeLabels);
+    for (int i = 0; i < podsResolvedToDataNodes.size(); i++) {
+      String builtLabel = getLabel(podsResolvedToDataNodes.get(i), podLabels, nodeLabels);
       result.add(builtLabel);
 
       // Cache the value for potential use in a later request
-      this.topologyKeyCache.put(pod, builtLabel);
+      this.topologyKeyCache.put(podsResolvedToDataNodes.get(i), builtLabel);
+      // also cache the original name, in case that has resolved to a dataNode (so that
+      // the resolution step can be omitted next time this pod is encountered)
+      this.topologyKeyCache.put(names.get(i), builtLabel);
     }
     LOG.info("Returning resolved labels [{}]", result);
     return result;
@@ -292,13 +296,13 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
    *
    * @param names list of client pods to resolve to datanodes
    * @param podLabels map of podIPs and labels
-   * @param dns list of datanode nameswhich will be used to match nodenames
-   * @return
+   * @param dns list of datanode names which will be used to match nodenames
+   * @return a list of pods resolved to co-located datanodes where possible
    */
   private List<String> resolveDataNodesFromCallingPods(
       List<String> names, Map<String, Map<String, String>> podLabels, List<Pod> dns) {
-    List<String> dataNodes = new LinkedList<>();
-    List<Pod> pods = new LinkedList<>();
+    List<String> dataNodes = new ArrayList<>();
+    List<Pod> pods = new ArrayList<>();
 
     for (String name : names) {
       // if we don't find a dataNode running on the same node as a non-dataNode pod, then

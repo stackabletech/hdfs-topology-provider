@@ -10,6 +10,7 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.hadoop.net.DNSToSwitchMapping;
@@ -36,6 +37,10 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   private final Cache<String, String> topologyKeyCache =
       Caffeine.newBuilder().expireAfterWrite(getCacheExpiration(), TimeUnit.SECONDS).build();
   private final Cache<String, Node> nodeKeyCache =
+      Caffeine.newBuilder()
+          .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
+          .build();
+  private final Cache<String, Pod> podKeyCache =
       Caffeine.newBuilder()
           .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
           .build();
@@ -302,7 +307,26 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   private List<String> resolveDataNodesFromCallingPods(
       List<String> names, Map<String, Map<String, String>> podLabels, List<Pod> dns) {
     List<String> dataNodes = new ArrayList<>();
-    List<Pod> pods = new ArrayList<>();
+
+    // if any of the names do not exist in the pod cache then refresh it
+    List<Pod> cachedPods =
+        names.stream().map(this.podKeyCache::getIfPresent).collect(Collectors.toList());
+    if (cachedPods.contains(null)) {
+      LOG.info(
+          "refreshing pod cache as not all of [{}] present in [{}]",
+          names,
+          this.podKeyCache.asMap().keySet());
+      for (Pod pod : client.pods().list().getItems()) {
+        this.podKeyCache.put(pod.getMetadata().getName(), pod);
+        // also add an entry for each IP
+        for (PodIP ip : pod.getStatus().getPodIPs()) {
+          this.podKeyCache.put(ip.getIp(), pod);
+        }
+      }
+    } else {
+      LOG.info("pod cache contains [{}]", names);
+    }
+    ConcurrentMap<String, Pod> pods = this.podKeyCache.asMap();
 
     for (String name : names) {
       // if we don't find a dataNode running on the same node as a non-dataNode pod, then
@@ -317,13 +341,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           replacementDataNodeIp = podIp;
           LOG.info("added as found in the datanode map [{}]", podIp);
         } else {
-          // we've received a call from a non-datanode pod.
-          // Only calls pods once per function call, but then only if we have a non-datanode.
-          // TODO cache pods so that multiple calls can benefit from cached values.
-          if (pods.isEmpty()) {
-            pods = client.pods().list().getItems();
-          }
-          for (Pod pod : pods) {
+          // we've received a call from a non-datanode pod
+          for (Pod pod : pods.values()) {
             if (pod.getStatus().getPodIPs().contains(new PodIP(podIp))) {
               String nodeName = pod.getSpec().getNodeName();
               for (Pod dn : dns) {

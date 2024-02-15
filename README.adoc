@@ -1,4 +1,4 @@
-# Stackable Network Topology Provider for Apache Hadoop
+= Stackable Network Topology Provider for Apache Hadoop
 
 Hadoop supports a concept called https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/RackAwareness.html[rack awareness] (lately also often called topology awareness).
 
@@ -15,7 +15,9 @@ From this state store the tool can then calculate rack IDs for nodes that HDFS a
 
 Results are cached for a configurable amount of time and served from the cache if present.
 
-## Configuration
+In a Kubernetes environment it is likely that the majority of writes will not come from the DataNodes themselves, but rather from other processes such as Spark executors writing data to HDFS. The NameNode passes these on to the topology provider to request the rack ID i.e. it provides the IP addresses of whichever pods are doing the writing. If a datanode resides on the same Kubernetes node as one of these pods, then this datanode is used for label resolution for that pod.
+
+== Configuration
 
 Configuration of the tool happens via environment variables, as shown below:
 
@@ -57,7 +59,7 @@ The maximum number of levels that can be specified to build a rack id from.
 
 While this can be changed, HDFS probably only supports a maximum of two levels, so it is not recommended to change the default for this setting.
 
-## Testing
+== Testing
 
 There are currently no unit tests.
 

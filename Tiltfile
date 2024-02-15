@@ -1,7 +1,6 @@
 k8s_yaml ('test/stack/01-install-krb5-kdc.yaml')
 k8s_yaml ('test/stack/02-create-kerberos-secretclass.yaml')
 k8s_yaml ('test/stack/03-hdfs.yaml')
-k8s_yaml ('test/stack/04-rolebinding.yaml')
 
 local_resource(
   'compile authorizer',

@@ -6,14 +6,13 @@ apiVersion: spark.stackable.tech/v1alpha1
 kind: SparkApplication
 metadata:
   name: spark-teragen
-  namespace: default
 spec:
   sparkImage:
     custom: docker.stackable.tech/stackable/spark-k8s-with-teragen:3.5.0-stackable0.0.0-dev
     productVersion: 3.5.0
     pullPolicy: IfNotPresent
   mode: cluster
-  mainApplicationFile: local:///stackable/teragen/spark-terasort-1.2-SNAPSHOT.jar
+  mainApplicationFile: local:///tmp/spark-terasort-1.2-SNAPSHOT.jar
   mainClass: com.github.ehiggs.spark.terasort.TeraGen
   args:
     - "10M"
@@ -21,17 +20,17 @@ spec:
   sparkConf:
     "spark.driver.extraClassPath": "/etc/hadoop/conf/:/stackable/spark/extra-jars/*"
     "spark.executor.extraClassPath": "/etc/hadoop/conf/:/stackable/spark/extra-jars/*"
-    "spark.kerberos.keytab": "/stackable/kerberos/keytab"
-    "spark.kerberos.principal": "testuser/spark-teragen.default.svc.cluster.local@CLUSTER.LOCAL"
-    "spark.driver.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
-    "spark.executor.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
+    "spark.kerberos.keytab": "/stackable/kerberos-keytab/keytab"
+    "spark.kerberos.principal": "testuser/spark-teragen.razvan.svc.cluster.local@CLUSTER.LOCAL"
+    "spark.driver.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos-config/krb5.conf"
+    "spark.executor.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos-config/krb5.conf"
   job:
     podOverrides:
       spec:
         volumes:
-          - name: hdfs-config
-            configMap:
-              name: simple-hdfs-kerberos
+          #- name: hdfs-config
+          #  configMap:
+          #    name: simple-hdfs-kerberos
           - name: kerberos-config
             configMap:
               name: krb5-kdc
@@ -40,7 +39,7 @@ spec:
               volumeClaimTemplate:
                 metadata:
                   annotations:
-                    secrets.stackable.tech/class: kerberos-default
+                    secrets.stackable.tech/class: kerberos-razvan
                     secrets.stackable.tech/scope: service=spark-teragen
                     secrets.stackable.tech/kerberos.service.names: testuser
                 spec:
@@ -56,14 +55,14 @@ spec:
               - name: hdfs-config
                 mountPath: /etc/hadoop/conf
               - name: kerberos
-                mountPath: /stackable/kerberos
+                mountPath: /stackable/kerberos-keytab
   driver:
     config:
       volumeMounts:
         - name: hdfs-config
           mountPath: /etc/hadoop/conf
-        - name: kerberos
-          mountPath: /stackable/kerberos
+        - name: kerberos-config
+          mountPath: /stackable/kerberos-config
       resources:
         cpu:
           min: "1"
@@ -71,16 +70,16 @@ spec:
         memory:
           limit: "1Gi"
   executor:
-    replicas: 3
+    replicas: 1
     config:
       volumeMounts:
         - name: hdfs-config
           mountPath: /etc/hadoop/conf
-        - name: kerberos
-          mountPath: /stackable/kerberos
+        - name: kerberos-config
+          mountPath: /stackable/kerberos-config
       resources:
         cpu:
-          min: "2"
+          min: "200m"
           max: "4"
         memory:
           limit: "2Gi"
@@ -96,7 +95,7 @@ spec:
         volumeClaimTemplate:
           metadata:
             annotations:
-              secrets.stackable.tech/class: kerberos-default
+              secrets.stackable.tech/class: kerberos-razvan
               secrets.stackable.tech/scope: service=spark-teragen
               secrets.stackable.tech/kerberos.service.names: testuser
           spec:

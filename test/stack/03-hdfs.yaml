@@ -26,20 +26,20 @@ metadata:
 spec:
   image:
     productVersion: 3.3.6
-    custom: docker.stackable.tech/stackable/hadoop-with-topology-provider:3.3.6-stackable0.0.0-dev
+    #custom: docker.stackable.tech/stackable/hadoop-with-topology-provider:3.3.6-stackable0.0.0-dev
     pullPolicy: IfNotPresent
   clusterConfig:
     dfsReplication: 1
     zookeeperConfigMapName: simple-hdfs-znode
-    rackAwareness:
-      - labelType: node
-        labelName: kubernetes.io/hostname
-      - labelType: pod
-        labelName: app.kubernetes.io/role-group
+    #rackAwareness:
+    #  - labelType: node
+    #    labelName: kubernetes.io/hostname
+    #  - labelType: pod
+    #    labelName: app.kubernetes.io/role-group
     authentication:
-      tlsSecretClass: tls
+      tlsSecretClass: tls-razvan
       kerberos:
-        secretClass: kerberos-default
+        secretClass: kerberos-razvan
   nameNodes:
     configOverrides: &configOverrides
       core-site.xml:

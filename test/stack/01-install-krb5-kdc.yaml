@@ -1,4 +1,31 @@
 ---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: test-role
+rules:
+  - apiGroups: ["security.openshift.io"]
+    resources: ["securitycontextconstraints"]
+    resourceNames: ["privileged"]
+    verbs: ["use"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: test-sa
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: test-rb
+subjects:
+  - kind: ServiceAccount
+    name: test-sa
+roleRef:
+  kind: Role
+  name: test-role
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -29,6 +56,9 @@ spec:
       labels:
         app: krb5-kdc
     spec:
+      serviceAccountName: test-sa
+      securityContext:
+        runAsUser: 0
       initContainers:
         - name: init
           image: docker.stackable.tech/stackable/krb5:1.18.2-stackable0.0.0-dev
@@ -126,6 +156,7 @@ data:
     CLUSTER.LOCAL = {
      acl_file = /stackable/config/kadm5.acl
      disable_encrypted_timestamp = false
+     kdc = krb5-kdc.razvan.svc.cluster.local
     }
     [domain_realm]
     .cluster.local = CLUSTER.LOCAL

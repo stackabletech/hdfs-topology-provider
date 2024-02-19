@@ -26,8 +26,7 @@ metadata:
 spec:
   image:
     productVersion: 3.3.6
-    custom: docker.stackable.tech/stackable/hadoop-with-topology-provider:3.3.6-stackable0.0.0-dev
-    pullPolicy: IfNotPresent
+    custom: hdfs # updated by tilt
   clusterConfig:
     dfsReplication: 1
     zookeeperConfigMapName: simple-hdfs-znode

@@ -2,11 +2,10 @@ package tech.stackable.hadoop;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import io.fabric8.kubernetes.api.model.Node;
-import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.api.model.PodIP;
-import io.fabric8.kubernetes.client.DefaultKubernetesClient;
+import io.fabric8.kubernetes.api.model.*;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
@@ -30,6 +29,11 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   public static final String VARNAME_CACHE_EXPIRATION = "TOPOLOGY_CACHE_EXPIRATION_SECONDS";
   public static final String VARNAME_MAXLEVELS = "TOPOLOGY_MAX_LEVELS";
   public static final String DEFAULT_RACK = "/defaultRack";
+  public static final String LISTENER_PREFIX = "listener-";
+  public static final String LISTENER_SUFFIX = "-listener";
+  public static final String ADDRESS = "address";
+  public static final String STATUS = "status";
+  public static final String INGRESS_ADDRESSES = "ingressAddresses";
   private static final int MAX_LEVELS_DEFAULT = 2;
   private static final int CACHE_EXPIRY_DEFAULT_SECONDS = 5 * 60;
   private final Logger LOG = LoggerFactory.getLogger(StackableTopologyProvider.class);
@@ -37,6 +41,11 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   private final Cache<String, String> topologyKeyCache =
       Caffeine.newBuilder().expireAfterWrite(getCacheExpiration(), TimeUnit.SECONDS).build();
   private final Cache<String, Node> nodeKeyCache =
+      Caffeine.newBuilder()
+          .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
+          .build();
+
+  private final Cache<String, GenericKubernetesResource> listenerKeyCache =
       Caffeine.newBuilder()
           .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
           .build();
@@ -49,7 +58,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   private final List<TopologyLabel> labels;
 
   public StackableTopologyProvider() {
-    this.client = new DefaultKubernetesClient();
+    this.client = new KubernetesClientBuilder().build(); // new DefaultKubernetesClient();
 
     // Read the labels to be used to build a topology from environment variables. Labels are
     // configured in the EnvVar "TOPOLOGY_LABELS". They should be specified in the form
@@ -75,7 +84,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           Arrays.stream(labelConfigs).map(TopologyLabel::new).collect(Collectors.toList());
 
       // Check if any labelConfigs were invalid
-      if (!this.labels.stream().noneMatch(label -> label.labelType == LabelType.Undefined)) {
+      if (this.labels.stream().anyMatch(label -> label.labelType == LabelType.Undefined)) {
         LOG.error(
             "Topologylabel contained invalid configuration for at least one label: "
                 + "double check your config! Labels should be specified in the "
@@ -96,6 +105,18 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           "Topology config yields labels [{}]",
           this.labels.stream().map(label -> label.name).collect(Collectors.toList()));
     }
+  }
+
+  private static List<String> getIngressAddresses(GenericKubernetesResource listener) {
+    // suppress warning as we know the structure of our own listener resource
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> ingressAddresses =
+        ((List<Map<String, Object>>)
+            ((Map<String, Object>) listener.getAdditionalProperties().get(STATUS))
+                .get(INGRESS_ADDRESSES));
+    return ingressAddresses.stream()
+        .map(ingress -> (String) ingress.get(ADDRESS))
+        .collect(Collectors.toList());
   }
 
   /***
@@ -223,7 +244,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
   @Override
   public List<String> resolve(List<String> names) {
-    LOG.info("Resolving for pods [{}]", names.toString());
+    LOG.info("Resolving for listeners/client-pods [{}]", names.toString());
 
     if (this.labels.isEmpty()) {
       LOG.info(
@@ -256,11 +277,14 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             .withLabel("app.kubernetes.io/name", "hdfs")
             .list()
             .getItems();
-    LOG.debug(
+    LOG.info(
         "Retrieved datanodes: [{}]",
         datanodes.stream()
             .map(datanode -> datanode.getMetadata().getName())
             .collect(Collectors.toList()));
+
+    List<String> namesToDataNodeNames = getListenerToDataNodeNames(names, datanodes);
+    LOG.info("Now resolving: [{}]", namesToDataNodeNames);
 
     // Build internal state that is later used to look up information. Basically this transposes pod
     // and node lists into hashmaps where pod-IPs can be used to look up labels for the pods and
@@ -276,7 +300,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     LOG.debug("Resolved pod labels map [{}]/[{}]", podLabels.keySet(), podLabels.values());
 
     List<String> podsResolvedToDataNodes =
-        resolveDataNodesFromCallingPods(names, podLabels, datanodes);
+        resolveDataNodesFromCallingPods(namesToDataNodeNames, podLabels, datanodes);
 
     // Iterate over all nodes to resolve and return the topology zones
     for (int i = 0; i < podsResolvedToDataNodes.size(); i++) {
@@ -291,6 +315,83 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     }
     LOG.info("Returning resolved labels [{}]", result);
     return result;
+  }
+
+  private List<String> getListenerToDataNodeNames(List<String> names, List<Pod> datanodes) {
+    // we need to map the listener ingress address - via the listener datanode name -
+    // to the datanode IP, and use that hereafter
+    List<GenericKubernetesResource> cachedListeners =
+        names.stream().map(this.listenerKeyCache::getIfPresent).collect(Collectors.toList());
+    if (cachedListeners.contains(null)) {
+      LOG.info(
+          "Refreshing listener cache as not all of [{}] present in [{}]",
+          names,
+          this.listenerKeyCache.asMap().keySet());
+
+      ResourceDefinitionContext listenerCrd =
+          new ResourceDefinitionContext.Builder()
+              .withGroup("listeners.stackable.tech")
+              .withVersion("v1alpha1")
+              .withPlural("listeners")
+              .withNamespaced(true)
+              .build();
+
+      GenericKubernetesResourceList listeners =
+          client.genericKubernetesResources(listenerCrd).list();
+
+      for (GenericKubernetesResource listener : listeners.getItems()) {
+        this.listenerKeyCache.put(listener.getMetadata().getName(), listener);
+        // also add the IPs
+        for (String ingressAddress : getIngressAddresses(listener)) {
+          this.listenerKeyCache.put(ingressAddress, listener);
+        }
+      }
+    } else {
+      LOG.info("Listener cache contains [{}]", names);
+    }
+    ConcurrentMap<String, GenericKubernetesResource> listeners = this.listenerKeyCache.asMap();
+
+    List<String> listenerToDataNodeNames = new ArrayList<>();
+
+    for (String name : names) {
+      String resolvedName = resolveListenerToDataNode(name, listeners, datanodes);
+      listenerToDataNodeNames.add(resolvedName);
+    }
+    return listenerToDataNodeNames;
+  }
+
+  private String resolveListenerToDataNode(
+      String name,
+      ConcurrentMap<String, GenericKubernetesResource> listeners,
+      List<Pod> datanodes) {
+    LOG.info("Attempting to resolve [{}]", name);
+    for (GenericKubernetesResource listener : listeners.values()) {
+      // the listener name is the same as the PVC name for namenodes, whereas the
+      // datanodes use ephemeral volumes, which are named differently (namenodes are prefixed
+      // and datanodes are suffixed: it is unclear if this could change if the K8s schemas
+      // change.
+      String dataNodePart =
+          listener.getMetadata().getName().split(LISTENER_PREFIX)[0].split(LISTENER_SUFFIX)[0];
+
+      List<String> ingressAddresses = getIngressAddresses(listener);
+      for (String ingressAddress : ingressAddresses) {
+        LOG.debug("Address [{}] to match to name [{}]", ingressAddress, dataNodePart);
+        if (name.equalsIgnoreCase(ingressAddress)) {
+          LOG.debug("Matched ingressAddress [{}] to [{}]", name, dataNodePart);
+          for (Pod dataNode : datanodes) {
+            if (dataNode.getMetadata().getName().equalsIgnoreCase(dataNodePart)) {
+              LOG.info(
+                  "Matched ingressAddress [{}] to dataNode IP [{}]",
+                  name,
+                  dataNode.getStatus().getPodIP());
+              return dataNode.getStatus().getPodIP();
+            }
+          }
+        }
+      }
+    }
+    LOG.info("No match, returning [{}]", name);
+    return name;
   }
 
   /**
@@ -313,7 +414,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         names.stream().map(this.podKeyCache::getIfPresent).collect(Collectors.toList());
     if (cachedPods.contains(null)) {
       LOG.info(
-          "refreshing pod cache as not all of [{}] present in [{}]",
+          "Refreshing pod cache as not all of [{}] present in [{}]",
           names,
           this.podKeyCache.asMap().keySet());
       for (Pod pod : client.pods().list().getItems()) {
@@ -324,7 +425,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         }
       }
     } else {
-      LOG.info("pod cache contains [{}]", names);
+      LOG.info("Pod cache contains [{}]", names);
     }
     ConcurrentMap<String, Pod> pods = this.podKeyCache.asMap();
 
@@ -339,7 +440,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         String podIp = address.getHostAddress();
         if (podLabels.containsKey(podIp)) {
           replacementDataNodeIp = podIp;
-          LOG.info("added as found in the datanode map [{}]", podIp);
+          LOG.info("Added as found in the datanode map [{}]", podIp);
         } else {
           // we've received a call from a non-datanode pod
           for (Pod pod : pods.values()) {
@@ -348,7 +449,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
               for (Pod dn : dns) {
                 if (dn.getSpec().getNodeName().equals(nodeName)) {
                   LOG.debug(
-                      "nodeName [{}] matches with [{}]?", dn.getSpec().getNodeName(), nodeName);
+                      "NodeName [{}] matches with [{}]?", dn.getSpec().getNodeName(), nodeName);
                   replacementDataNodeIp = dn.getStatus().getPodIP();
                   break;
                 }
@@ -357,7 +458,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           }
         }
       } catch (UnknownHostException e) {
-        LOG.warn("error encounter [{}]", e.getLocalizedMessage());
+        LOG.warn("Error encountered while resolving host [{}]", e.getLocalizedMessage());
       }
       dataNodes.add(replacementDataNodeIp);
     }

@@ -53,7 +53,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       Caffeine.newBuilder()
           .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
           .build();
-  // The list of labels that this provider uses to generate the topologyinformation for any given
+  // The list of labels that this provider uses to generate the topology information for any given
   // datanode
   private final List<TopologyLabel> labels;
 
@@ -386,7 +386,9 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     for (GenericKubernetesResource listener : listeners.values()) {
       // the listener name is the same as the PVC name for namenodes, whereas the datanodes use
       // ephemeral volumes, which are named differently (namenodes are prefixed and datanodes are
-      // suffixed: it is unclear if this could change if the K8s schemas change).
+      // suffixed: it is unclear if this could change if the K8s schemas change). Suppress
+      // StringSplitter warnings (see: https://errorprone.info/bugpattern/StringSplitter)
+      @SuppressWarnings("StringSplitter")
       String dataNodePart =
           listener.getMetadata().getName().split(LISTENER_PREFIX)[0].split(LISTENER_SUFFIX)[0];
 

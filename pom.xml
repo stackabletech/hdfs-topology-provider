@@ -179,10 +179,6 @@
                   <pattern>com.fasterxml</pattern>
                   <shadedPattern>org.shaded.fasterxml</shadedPattern>
                 </relocation>
-                <!--relocation>
-                  <pattern>io.fabric8</pattern>
-                  <shadedPattern>org.shaded.fabric8</shadedPattern>
-                </relocation-->
               </relocations>
             </configuration>
           </execution>

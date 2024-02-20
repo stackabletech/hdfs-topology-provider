@@ -3,8 +3,8 @@ package tech.stackable.hadoop;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.fabric8.kubernetes.api.model.*;
-import io.fabric8.kubernetes.client.DefaultKubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -29,8 +29,6 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   public static final String VARNAME_CACHE_EXPIRATION = "TOPOLOGY_CACHE_EXPIRATION_SECONDS";
   public static final String VARNAME_MAXLEVELS = "TOPOLOGY_MAX_LEVELS";
   public static final String DEFAULT_RACK = "/defaultRack";
-  public static final String LISTENER_PREFIX = "listener-";
-  public static final String LISTENER_SUFFIX = "-listener";
   public static final String ADDRESS = "address";
   public static final String STATUS = "status";
   public static final String INGRESS_ADDRESSES = "ingressAddresses";
@@ -58,7 +56,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   private final List<TopologyLabel> labels;
 
   public StackableTopologyProvider() {
-    this.client = new DefaultKubernetesClient();
+    this.client = new KubernetesClientBuilder().build();
 
     // Read the labels to be used to build a topology from environment variables. Labels are
     // configured in the EnvVar "TOPOLOGY_LABELS". They should be specified in the form
@@ -283,7 +281,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             .map(datanode -> datanode.getMetadata().getName())
             .collect(Collectors.toList()));
 
-    List<String> namesToDataNodeNames = dataNodesResolvedFromListenerOrOriginal(names, datanodes);
+    List<String> namesToDataNodeNames = dataNodesResolvedFromListenerOrOriginal(names);
     LOG.debug("Now resolving: [{}]", namesToDataNodeNames);
 
     // Build internal state that is later used to look up information. Basically this transposes pod
@@ -322,12 +320,10 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
    * subsequently.
    *
    * @param names the collection of names to resolve
-   * @param datanodes the dataNodes against which to conduct the resolution
    * @return a collection of either the name (for non-listener) or the dataNode IP to which this
    *     listener resolves
    */
-  private List<String> dataNodesResolvedFromListenerOrOriginal(
-      List<String> names, List<Pod> datanodes) {
+  private List<String> dataNodesResolvedFromListenerOrOriginal(List<String> names) {
     List<GenericKubernetesResource> cachedListeners =
         names.stream().map(this.listenerKeyCache::getIfPresent).collect(Collectors.toList());
     if (cachedListeners.contains(null)) {
@@ -388,7 +384,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           LOG.debug("Matched ingressAddress [{}]/[{}]", name, listener.getMetadata().getName());
 
           Endpoints ep = client.endpoints().withName(listener.getMetadata().getName()).get();
-          // TODO: fix this: when does an endpoint support multiple datanodes?
+          // TODO: Assuming single address per datanode endpoint: fix this
+          // When does/can an endpoint support multiple datanodes? e.g. on restart?
           EndpointAddress address = ep.getSubsets().get(0).getAddresses().get(0);
           LOG.info(
               "Endpoint [{}], IP [{}], node [{}]",

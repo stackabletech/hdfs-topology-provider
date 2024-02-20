@@ -32,9 +32,6 @@ spec:
           - name: hdfs-config
             configMap:
               name: simple-hdfs-kerberos
-          - name: kerberos-config
-            configMap:
-              name: krb5-kdc
           - name: kerberos
             ephemeral:
               volumeClaimTemplate:
@@ -88,9 +85,6 @@ spec:
     - name: hdfs-config
       configMap:
         name: simple-hdfs-kerberos
-    - name: kerberos-config
-      configMap:
-        name: krb5-kdc
     - name: kerberos
       ephemeral:
         volumeClaimTemplate:

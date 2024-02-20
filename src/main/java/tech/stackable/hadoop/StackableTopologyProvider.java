@@ -372,15 +372,22 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           LOG.debug("Matched ingressAddress [{}]/[{}]", name, listener.getMetadata().getName());
 
           Endpoints ep = client.endpoints().withName(listener.getMetadata().getName()).get();
-          // TODO: Assuming single address per datanode endpoint: fix this
-          // When does/can an endpoint support multiple datanodes? e.g. on restart?
-          EndpointAddress address = ep.getSubsets().get(0).getAddresses().get(0);
-          LOG.info(
-              "Endpoint [{}], IP [{}], node [{}]",
-              ep.getMetadata().getName(),
-              address.getIp(),
-              address.getNodeName());
-          return address.getIp();
+          // TODO: Assuming single address per datanode endpoint.
+          // When does/can an endpoint support multiple data nodes? On restart the address list will
+          // be empty for a moment or two.
+          if (ep.getSubsets().size() < 1) {
+            LOG.warn(
+                "Endpoint [{}] address not detected, pod maybe restarting...",
+                ep.getMetadata().getName());
+          } else {
+            EndpointAddress address = ep.getSubsets().get(0).getAddresses().get(0);
+            LOG.info(
+                "Endpoint [{}], IP [{}], node [{}]",
+                ep.getMetadata().getName(),
+                address.getIp(),
+                address.getNodeName());
+            return address.getIp();
+          }
         }
       }
     }

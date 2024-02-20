@@ -29,9 +29,6 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
   public static final String VARNAME_CACHE_EXPIRATION = "TOPOLOGY_CACHE_EXPIRATION_SECONDS";
   public static final String VARNAME_MAXLEVELS = "TOPOLOGY_MAX_LEVELS";
   public static final String DEFAULT_RACK = "/defaultRack";
-  public static final String ADDRESS = "address";
-  public static final String STATUS = "status";
-  public static final String INGRESS_ADDRESSES = "ingressAddresses";
   private static final int MAX_LEVELS_DEFAULT = 2;
   private static final int CACHE_EXPIRY_DEFAULT_SECONDS = 5 * 60;
   private final Logger LOG = LoggerFactory.getLogger(StackableTopologyProvider.class);
@@ -103,18 +100,6 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           "Topology config yields labels [{}]",
           this.labels.stream().map(label -> label.name).collect(Collectors.toList()));
     }
-  }
-
-  private static List<String> getIngressAddresses(GenericKubernetesResource listener) {
-    // suppress warning as we know the structure of our own listener resource
-    @SuppressWarnings("unchecked")
-    List<Map<String, Object>> ingressAddresses =
-        ((List<Map<String, Object>>)
-            ((Map<String, Object>) listener.getAdditionalProperties().get(STATUS))
-                .get(INGRESS_ADDRESSES));
-    return ingressAddresses.stream()
-        .map(ingress -> (String) ingress.get(ADDRESS))
-        .collect(Collectors.toList());
   }
 
   /***
@@ -332,21 +317,12 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           names,
           this.listenerKeyCache.asMap().keySet());
 
-      ResourceDefinitionContext listenerCrd =
-          new ResourceDefinitionContext.Builder()
-              .withGroup("listeners.stackable.tech")
-              .withVersion("v1alpha1")
-              .withPlural("listeners")
-              .withNamespaced(true)
-              .build();
-
-      GenericKubernetesResourceList listeners =
-          client.genericKubernetesResources(listenerCrd).list();
+      GenericKubernetesResourceList listeners = getListeners();
 
       for (GenericKubernetesResource listener : listeners.getItems()) {
         this.listenerKeyCache.put(listener.getMetadata().getName(), listener);
         // also add the IPs
-        for (String ingressAddress : getIngressAddresses(listener)) {
+        for (String ingressAddress : TopologyUtils.getIngressAddresses(listener)) {
           this.listenerKeyCache.put(ingressAddress, listener);
         }
       }
@@ -364,6 +340,18 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     return listenerToDataNodeNames;
   }
 
+  private GenericKubernetesResourceList getListeners() {
+    ResourceDefinitionContext listenerCrd =
+        new ResourceDefinitionContext.Builder()
+            .withGroup("listeners.stackable.tech")
+            .withVersion("v1alpha1")
+            .withPlural("listeners")
+            .withNamespaced(true)
+            .build();
+
+    return client.genericKubernetesResources(listenerCrd).list();
+  }
+
   /**
    * We don't know if the name refers to a listener (it could be any client pod) but we check to see
    * if it can be resolved to a dataNode just in case.
@@ -377,7 +365,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       String name, ConcurrentMap<String, GenericKubernetesResource> listeners) {
     LOG.debug("Attempting to resolve [{}]", name);
     for (GenericKubernetesResource listener : listeners.values()) {
-      List<String> ingressAddresses = getIngressAddresses(listener);
+      List<String> ingressAddresses = TopologyUtils.getIngressAddresses(listener);
       for (String ingressAddress : ingressAddresses) {
         LOG.debug("Address [{}]", ingressAddress);
         if (name.equalsIgnoreCase(ingressAddress)) {

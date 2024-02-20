@@ -362,7 +362,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     List<String> listenerToDataNodeNames = new ArrayList<>();
 
     for (String name : names) {
-      String resolvedName = resolveDataNodesFromListeners(name, listeners, datanodes);
+      String resolvedName = resolveDataNodesFromListeners(name, listeners);
       listenerToDataNodeNames.add(resolvedName);
     }
     return listenerToDataNodeNames;
@@ -375,37 +375,27 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
    * @param name the name of the calling pod which should be resolved to a dataNode IP if it is a
    *     listener
    * @param listeners the current listener collection
-   * @param datanodes the dataNode collection
    * @return either the name (for non-listener) or the dataNode IP to which this listener resolves
    */
   private String resolveDataNodesFromListeners(
-      String name,
-      ConcurrentMap<String, GenericKubernetesResource> listeners,
-      List<Pod> datanodes) {
+      String name, ConcurrentMap<String, GenericKubernetesResource> listeners) {
     LOG.debug("Attempting to resolve [{}]", name);
     for (GenericKubernetesResource listener : listeners.values()) {
-      // the listener name is the same as the PVC name for namenodes, whereas the datanodes use
-      // ephemeral volumes, which are named differently (namenodes are prefixed and datanodes are
-      // suffixed: it is unclear if this could change if the K8s schemas change). Suppress
-      // StringSplitter warnings (see: https://errorprone.info/bugpattern/StringSplitter)
-      @SuppressWarnings("StringSplitter")
-      String dataNodePart =
-          listener.getMetadata().getName().split(LISTENER_PREFIX)[0].split(LISTENER_SUFFIX)[0];
-
       List<String> ingressAddresses = getIngressAddresses(listener);
       for (String ingressAddress : ingressAddresses) {
-        LOG.debug("Address [{}] to match to name [{}]", ingressAddress, dataNodePart);
+        LOG.debug("Address [{}]", ingressAddress);
         if (name.equalsIgnoreCase(ingressAddress)) {
-          LOG.debug("Matched ingressAddress [{}] to [{}]", name, dataNodePart);
-          for (Pod dataNode : datanodes) {
-            if (dataNode.getMetadata().getName().equalsIgnoreCase(dataNodePart)) {
-              LOG.info(
-                  "Matched ingressAddress [{}] to dataNode IP [{}]",
-                  name,
-                  dataNode.getStatus().getPodIP());
-              return dataNode.getStatus().getPodIP();
-            }
-          }
+          LOG.debug("Matched ingressAddress [{}]/[{}]", name, listener.getMetadata().getName());
+
+          Endpoints ep = client.endpoints().withName(listener.getMetadata().getName()).get();
+          // TODO: fix this: when does an endpoint support multiple datanodes?
+          EndpointAddress address = ep.getSubsets().get(0).getAddresses().get(0);
+          LOG.info(
+              "Endpoint [{}], IP [{}], node [{}]",
+              ep.getMetadata().getName(),
+              address.getIp(),
+              address.getNodeName());
+          return address.getIp();
         }
       }
     }

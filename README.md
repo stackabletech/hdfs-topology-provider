@@ -1,4 +1,4 @@
-[Documentation](https://docs.stackable.tech/home/stable/hdfs) | [Stackable Data Platform](https://stackable.tech/) | [Platform Docs](https://docs.stackable.tech/) | [Discussions](https://github.com/orgs/stackabletech/discussions) | [Discord](https://discord.gg/7kZ3BNnCAF)
+[Documentation (HDFS Operator)](https://docs.stackable.tech/home/stable/hdfs) | [Stackable Data Platform](https://stackable.tech/) | [Platform Docs](https://docs.stackable.tech/) | [Discussions](https://github.com/orgs/stackabletech/discussions) | [Discord](https://discord.gg/7kZ3BNnCAF)
 
 = Stackable Network Topology Provider for Apache Hadoop
 

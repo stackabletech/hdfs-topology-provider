@@ -1,8 +1,4 @@
-<p align="center">
-  <img width="150" src="./.readme/static/borrowed/Icon_Stackable.svg" alt="Stackable Logo"/>
-</p>
-
-<h1 align="center">Stackable Network Topology Provider for Apache Hadoop</h1>
+# Stackable Network Topology Provider for Apache Hadoop
 
 [Documentation (HDFS Operator)](https://docs.stackable.tech/home/stable/hdfs) | [Stackable Data Platform](https://stackable.tech/) | [Platform Docs](https://docs.stackable.tech/) | [Discussions](https://github.com/orgs/stackabletech/discussions) | [Discord](https://discord.gg/7kZ3BNnCAF)
 

@@ -27,8 +27,10 @@ spec:
   job:
     config:
       volumeMounts:
-        - name: hdfs-config
-          mountPath: /etc/hadoop/conf
+        # !!! this one is not needed
+        #- name: hdfs-config
+        #  mountPath: /etc/hadoop/conf
+        # !!! this one is needed
         - name: kerberos
           mountPath: /stackable/kerberos
   driver:

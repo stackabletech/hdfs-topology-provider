@@ -1,3 +1,5 @@
+[Documentation](https://docs.stackable.tech/home/stable/hdfs) | [Stackable Data Platform](https://stackable.tech/) | [Platform Docs](https://docs.stackable.tech/) | [Discussions](https://github.com/orgs/stackabletech/discussions) | [Discord](https://discord.gg/7kZ3BNnCAF)
+
 = Stackable Network Topology Provider for Apache Hadoop
 
 Hadoop supports a concept called https://hadoop.apache.org/docs/stable/hadoop-project-dist/hadoop-common/RackAwareness.html[rack awareness] (lately also often called topology awareness).

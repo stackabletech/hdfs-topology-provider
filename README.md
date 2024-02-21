@@ -23,7 +23,7 @@ In a Kubernetes environment it is likely that the majority of writes will not co
 
 Configuration of the tool happens via environment variables, as shown below:
 
-*TOPOLOGY_LABELS*
+**TOPOLOGY_LABELS**
 
 A semicolon separated list of labels that should be used to build a rack id for a datanode.
 
@@ -31,29 +31,23 @@ A label is specified as `[node|pod]:<labelname>`
 
 Some examples:
 
-|===
+|Definition   |Resolved to   |
+|---|---|
+| node:topology.kubernetes.io/zone  | The value of the label 'topology.kubernetes.io/zone' on the node to which the pod has been assigned.  |
+| pod:app.kubernetes.io/role-group  | The value of the label 'app.kubernetes.io/role-group' on the datanode pod.  |
 
-|Definition |Resolved to
-
-|node:topology.kubernetes.io/zone
-|The value of the label 'topology.kubernetes.io/zone' on the node to which the pod has been assigned.
-
-|pod:app.kubernetes.io/role-group
-|The value of the label 'app.kubernetes.io/role-group' on the datanode pod.
-
-|===
 
 Multiple levels of labels can be combined (up to MAX_TOPOLOGY_LABELS levels) by separating them with a semicolon:
 
 So for example `node:topology.kubernetes.io/zone;pod:app.kubernetes.io/role-group` would resolve to `/<value of label topology.kubernetes.io/zone on the node>/<value of label app.kubernetes.io/role-group on the pod>`.
 
-*TOPOLOGY_CACHE_EXPIRATION_SECONDS*
+**TOPOLOGY_CACHE_EXPIRATION_SECONDS**
 
 Default: 5 Minutes
 
 The default time for which rack ids are cached, HDFS can influence caching, as the provider offers methods to invalidate the cache, so this is not a totally _reliable_ value, as there are external factors not under the control of this tool.
 
-*MAX_TOPOLOGY_LEVELS*
+**MAX_TOPOLOGY_LEVELS**
 
 Default: 2
 

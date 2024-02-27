@@ -248,7 +248,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       LOG.debug(
           "Cache doesn't contain values for all requested pods: new values will be built for all nodes.");
     } else {
-      LOG.debug("Answering from cached topology keys: [{}]", cachedValues);
+      // use same log level as the non-cached return statement
+      LOG.info("Answering from cached topology keys: [{}]", cachedValues);
       return cachedValues;
     }
 

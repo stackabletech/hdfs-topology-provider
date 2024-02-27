@@ -27,6 +27,7 @@ spec:
   image:
     productVersion: 3.3.6
     custom: hdfs # updated by tilt
+    pullPolicy: IfNotPresent
   clusterConfig:
     dfsReplication: 1
     zookeeperConfigMapName: simple-hdfs-znode

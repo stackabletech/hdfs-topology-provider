@@ -1,6 +1,3 @@
-# N.B. config-map simple-hdfs-kerberos is identical to the one deployed by the hdfs cluster (simple-hdfs)
-# but with the realm placeholder ${env.KERBEROS_REALM} replaced with CLUSTER.LOCAL. HDFs does this automatically
-# but Spark does not.
 ---
 apiVersion: spark.stackable.tech/v1alpha1
 kind: SparkApplication
@@ -24,13 +21,16 @@ spec:
     "spark.kerberos.principal": "testuser/spark-teragen.default.svc.cluster.local@CLUSTER.LOCAL"
     "spark.driver.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
     "spark.executor.extraJavaOptions": "-Djava.security.krb5.conf=/stackable/kerberos/krb5.conf"
+  env:
+    - name: KERBEROS_REALM
+      value: CLUSTER.LOCAL
   job:
     podOverrides:
       spec:
         volumes:
           - name: hdfs-config
             configMap:
-              name: simple-hdfs-kerberos
+              name: simple-hdfs
           - name: kerberos
             ephemeral:
               volumeClaimTemplate:
@@ -65,7 +65,7 @@ spec:
         memory:
           limit: "1Gi"
   executor:
-    replicas: 3
+    replicas: 1
     config:
       volumeMounts:
         - name: hdfs-config
@@ -81,7 +81,7 @@ spec:
   volumes:
     - name: hdfs-config
       configMap:
-        name: simple-hdfs-kerberos
+        name: simple-hdfs
     - name: kerberos
       ephemeral:
         volumeClaimTemplate:

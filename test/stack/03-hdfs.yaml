@@ -41,6 +41,8 @@ spec:
       kerberos:
         secretClass: kerberos-default
   nameNodes:
+    config:
+      listenerClass: external-stable # We want to access the Web UI
     configOverrides: &configOverrides
       core-site.xml:
         hadoop.user.group.static.mapping.overrides: "dr.who=;nn=;nm=;jn=;testuser=supergroup;"

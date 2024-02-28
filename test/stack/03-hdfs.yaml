@@ -26,7 +26,7 @@ metadata:
 spec:
   image:
     productVersion: 3.3.6
-    custom: docker.stackable.tech/stackable/hadoop-with-topology-provider:3.3.6-stackable0.0.0-dev
+    custom: hdfs # updated by tilt
     pullPolicy: IfNotPresent
   clusterConfig:
     dfsReplication: 1
@@ -41,6 +41,8 @@ spec:
       kerberos:
         secretClass: kerberos-default
   nameNodes:
+    config:
+      listenerClass: external-stable # We want to access the Web UI
     configOverrides: &configOverrides
       core-site.xml:
         hadoop.user.group.static.mapping.overrides: "dr.who=;nn=;nm=;jn=;testuser=supergroup;"

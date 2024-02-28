@@ -2,11 +2,10 @@ package tech.stackable.hadoop;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import io.fabric8.kubernetes.api.model.Node;
-import io.fabric8.kubernetes.api.model.Pod;
-import io.fabric8.kubernetes.api.model.PodIP;
-import io.fabric8.kubernetes.client.DefaultKubernetesClient;
+import io.fabric8.kubernetes.api.model.*;
 import io.fabric8.kubernetes.client.KubernetesClient;
+import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+import io.fabric8.kubernetes.client.dsl.base.ResourceDefinitionContext;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
@@ -40,16 +39,21 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       Caffeine.newBuilder()
           .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
           .build();
+
+  private final Cache<String, GenericKubernetesResource> listenerKeyCache =
+      Caffeine.newBuilder()
+          .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
+          .build();
   private final Cache<String, Pod> podKeyCache =
       Caffeine.newBuilder()
           .expireAfterWrite(CACHE_EXPIRY_DEFAULT_SECONDS, TimeUnit.SECONDS)
           .build();
-  // The list of labels that this provider uses to generate the topologyinformation for any given
+  // The list of labels that this provider uses to generate the topology information for any given
   // datanode
   private final List<TopologyLabel> labels;
 
   public StackableTopologyProvider() {
-    this.client = new DefaultKubernetesClient();
+    this.client = new KubernetesClientBuilder().build();
 
     // Read the labels to be used to build a topology from environment variables. Labels are
     // configured in the EnvVar "TOPOLOGY_LABELS". They should be specified in the form
@@ -75,7 +79,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           Arrays.stream(labelConfigs).map(TopologyLabel::new).collect(Collectors.toList());
 
       // Check if any labelConfigs were invalid
-      if (!this.labels.stream().noneMatch(label -> label.labelType == LabelType.Undefined)) {
+      if (this.labels.stream().anyMatch(label -> label.labelType == LabelType.Undefined)) {
         LOG.error(
             "Topologylabel contained invalid configuration for at least one label: "
                 + "double check your config! Labels should be specified in the "
@@ -223,7 +227,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
 
   @Override
   public List<String> resolve(List<String> names) {
-    LOG.info("Resolving for pods [{}]", names.toString());
+    LOG.info("Resolving for listeners/client-pods [{}]", names.toString());
 
     if (this.labels.isEmpty()) {
       LOG.info(
@@ -244,7 +248,8 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
       LOG.debug(
           "Cache doesn't contain values for all requested pods: new values will be built for all nodes.");
     } else {
-      LOG.debug("Answering from cached topology keys: [{}]", cachedValues);
+      // use same log level as the non-cached return statement
+      LOG.info("Answering from cached topology keys: [{}]", cachedValues);
       return cachedValues;
     }
 
@@ -262,6 +267,9 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
             .map(datanode -> datanode.getMetadata().getName())
             .collect(Collectors.toList()));
 
+    List<String> namesToDataNodeNames = dataNodesResolvedFromListenerOrOriginal(names);
+    LOG.debug("Now resolving: [{}]", namesToDataNodeNames);
+
     // Build internal state that is later used to look up information. Basically this transposes pod
     // and node lists into hashmaps where pod-IPs can be used to look up labels for the pods and
     // nodes. This is not terribly memory efficient because it effectively duplicates a lot of data
@@ -276,7 +284,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     LOG.debug("Resolved pod labels map [{}]/[{}]", podLabels.keySet(), podLabels.values());
 
     List<String> podsResolvedToDataNodes =
-        resolveDataNodesFromCallingPods(names, podLabels, datanodes);
+        resolveDataNodesFromCallingPods(namesToDataNodeNames, podLabels, datanodes);
 
     // Iterate over all nodes to resolve and return the topology zones
     for (int i = 0; i < podsResolvedToDataNodes.size(); i++) {
@@ -291,6 +299,101 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
     }
     LOG.info("Returning resolved labels [{}]", result);
     return result;
+  }
+
+  /**
+   * If the names include listeners then these must be resolved against the dataNode IPs and used
+   * subsequently.
+   *
+   * @param names the collection of names to resolve
+   * @return a collection of either the name (for non-listener) or the dataNode IP to which this
+   *     listener resolves
+   */
+  private List<String> dataNodesResolvedFromListenerOrOriginal(List<String> names) {
+    List<GenericKubernetesResource> cachedListeners =
+        names.stream().map(this.listenerKeyCache::getIfPresent).collect(Collectors.toList());
+    if (cachedListeners.contains(null)) {
+      LOG.debug(
+          "Refreshing listener cache as not all of [{}] present in [{}]",
+          names,
+          this.listenerKeyCache.asMap().keySet());
+
+      GenericKubernetesResourceList listeners = getListeners();
+
+      for (GenericKubernetesResource listener : listeners.getItems()) {
+        this.listenerKeyCache.put(listener.getMetadata().getName(), listener);
+        // also add the IPs
+        for (String ingressAddress : TopologyUtils.getIngressAddresses(listener)) {
+          this.listenerKeyCache.put(ingressAddress, listener);
+        }
+      }
+    } else {
+      LOG.debug("Listener cache contains [{}]", names);
+    }
+    ConcurrentMap<String, GenericKubernetesResource> listeners = this.listenerKeyCache.asMap();
+
+    List<String> listenerToDataNodeNames = new ArrayList<>();
+
+    for (String name : names) {
+      String resolvedName = resolveDataNodesFromListeners(name, listeners);
+      listenerToDataNodeNames.add(resolvedName);
+    }
+    return listenerToDataNodeNames;
+  }
+
+  private GenericKubernetesResourceList getListeners() {
+    ResourceDefinitionContext listenerCrd =
+        new ResourceDefinitionContext.Builder()
+            .withGroup("listeners.stackable.tech")
+            .withVersion("v1alpha1")
+            .withPlural("listeners")
+            .withNamespaced(true)
+            .build();
+
+    return client.genericKubernetesResources(listenerCrd).list();
+  }
+
+  /**
+   * We don't know if the name refers to a listener (it could be any client pod) but we check to see
+   * if it can be resolved to a dataNode just in case.
+   *
+   * @param name the name of the calling pod which should be resolved to a dataNode IP if it is a
+   *     listener
+   * @param listeners the current listener collection
+   * @return either the name (for non-listener) or the dataNode IP to which this listener resolves
+   */
+  private String resolveDataNodesFromListeners(
+      String name, ConcurrentMap<String, GenericKubernetesResource> listeners) {
+    LOG.debug("Attempting to resolve [{}]", name);
+    for (GenericKubernetesResource listener : listeners.values()) {
+      List<String> ingressAddresses = TopologyUtils.getIngressAddresses(listener);
+      for (String ingressAddress : ingressAddresses) {
+        LOG.debug("Address [{}]", ingressAddress);
+        if (name.equalsIgnoreCase(ingressAddress)) {
+          LOG.debug("Matched ingressAddress [{}]/[{}]", name, listener.getMetadata().getName());
+
+          Endpoints ep = client.endpoints().withName(listener.getMetadata().getName()).get();
+          // TODO: Assuming single address per datanode endpoint.
+          // When does/can an endpoint support multiple data nodes? On restart the address list will
+          // be empty for a moment or two.
+          if (ep.getSubsets().size() < 1) {
+            LOG.warn(
+                "Endpoint [{}] address not detected, pod maybe restarting...",
+                ep.getMetadata().getName());
+          } else {
+            EndpointAddress address = ep.getSubsets().get(0).getAddresses().get(0);
+            LOG.info(
+                "Endpoint [{}], IP [{}], node [{}]",
+                ep.getMetadata().getName(),
+                address.getIp(),
+                address.getNodeName());
+            return address.getIp();
+          }
+        }
+      }
+    }
+    LOG.info("Not a listener, returning [{}]", name);
+    return name;
   }
 
   /**
@@ -313,7 +416,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         names.stream().map(this.podKeyCache::getIfPresent).collect(Collectors.toList());
     if (cachedPods.contains(null)) {
       LOG.info(
-          "refreshing pod cache as not all of [{}] present in [{}]",
+          "Refreshing pod cache as not all of [{}] present in [{}]",
           names,
           this.podKeyCache.asMap().keySet());
       for (Pod pod : client.pods().list().getItems()) {
@@ -324,7 +427,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         }
       }
     } else {
-      LOG.info("pod cache contains [{}]", names);
+      LOG.info("Pod cache contains [{}]", names);
     }
     ConcurrentMap<String, Pod> pods = this.podKeyCache.asMap();
 
@@ -339,7 +442,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
         String podIp = address.getHostAddress();
         if (podLabels.containsKey(podIp)) {
           replacementDataNodeIp = podIp;
-          LOG.info("added as found in the datanode map [{}]", podIp);
+          LOG.info("Added as found in the datanode map [{}]", podIp);
         } else {
           // we've received a call from a non-datanode pod
           for (Pod pod : pods.values()) {
@@ -348,7 +451,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
               for (Pod dn : dns) {
                 if (dn.getSpec().getNodeName().equals(nodeName)) {
                   LOG.debug(
-                      "nodeName [{}] matches with [{}]?", dn.getSpec().getNodeName(), nodeName);
+                      "NodeName [{}] matches with [{}]?", dn.getSpec().getNodeName(), nodeName);
                   replacementDataNodeIp = dn.getStatus().getPodIP();
                   break;
                 }
@@ -357,7 +460,7 @@ public class StackableTopologyProvider implements DNSToSwitchMapping {
           }
         }
       } catch (UnknownHostException e) {
-        LOG.warn("error encounter [{}]", e.getLocalizedMessage());
+        LOG.warn("Error encountered while resolving host [{}]", e.getLocalizedMessage());
       }
       dataNodes.add(replacementDataNodeIp);
     }

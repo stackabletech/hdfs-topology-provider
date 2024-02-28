@@ -76,7 +76,12 @@
     <dependency>
       <groupId>io.fabric8</groupId>
       <artifactId>kubernetes-client</artifactId>
-      <version>4.11.2</version>
+      <version>6.10.0</version>
+    </dependency>
+    <dependency>
+      <groupId>io.fabric8</groupId>
+      <artifactId>kubernetes-client-api</artifactId>
+      <version>6.10.0</version>
     </dependency>
     <dependency>
       <groupId>junit</groupId>
@@ -173,10 +178,6 @@
                 <relocation>
                   <pattern>com.fasterxml</pattern>
                   <shadedPattern>org.shaded.fasterxml</shadedPattern>
-                </relocation>
-                <relocation>
-                  <pattern>io.fabric8</pattern>
-                  <shadedPattern>org.shaded.fabric8</shadedPattern>
                 </relocation>
               </relocations>
             </configuration>

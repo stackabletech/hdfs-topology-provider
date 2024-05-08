@@ -37,9 +37,9 @@
     <maven.compiler.release>${java.version}</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-    <cleanthat.version>2.17</cleanthat.version>
-    <error-prone.version>2.24.1</error-prone.version>
-    <google-java-format.version>1.19.2</google-java-format.version>
+    <cleanthat.version>2.20</cleanthat.version>
+    <error-prone.version>2.27.1</error-prone.version>
+    <google-java-format.version>1.22.0</google-java-format.version>
 
     <maven-clean-plugin.version>3.3.2</maven-clean-plugin.version>
     <maven-compiler-plugin.version>3.12.1</maven-compiler-plugin.version>
@@ -71,22 +71,22 @@
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
       <artifactId>caffeine</artifactId>
-      <version>2.5.5</version>
+      <version>3.1.8</version>
     </dependency>
     <dependency>
       <groupId>io.fabric8</groupId>
       <artifactId>kubernetes-client</artifactId>
-      <version>6.10.0</version>
+      <version>6.12.1</version>
     </dependency>
     <dependency>
       <groupId>io.fabric8</groupId>
       <artifactId>kubernetes-client-api</artifactId>
-      <version>6.10.0</version>
+      <version>6.12.1</version>
     </dependency>
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>4.13.1</version>
+      <version>4.13.2</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

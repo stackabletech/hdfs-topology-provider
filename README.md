@@ -31,11 +31,10 @@ A label is specified as `[node|pod]:<labelname>`
 
 Some examples:
 
-|Definition   |Resolved to   |
-|---|---|
-| node:topology.kubernetes.io/zone  | The value of the label 'topology.kubernetes.io/zone' on the node to which the pod has been assigned.  |
-| pod:app.kubernetes.io/role-group  | The value of the label 'app.kubernetes.io/role-group' on the datanode pod.  |
-
+|            Definition            |                                             Resolved to                                              |
+|----------------------------------|------------------------------------------------------------------------------------------------------|
+| node:topology.kubernetes.io/zone | The value of the label 'topology.kubernetes.io/zone' on the node to which the pod has been assigned. |
+| pod:app.kubernetes.io/role-group | The value of the label 'app.kubernetes.io/role-group' on the datanode pod.                           |
 
 Multiple levels of labels can be combined (up to MAX_TOPOLOGY_LABELS levels) by separating them with a semicolon:
 

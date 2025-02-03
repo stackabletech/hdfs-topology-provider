@@ -5,8 +5,10 @@
 ### Changed
 
 - Update pom dependencies ([#9]).
+- Update registry references to oci ([#25]).
 
 [#9]: https://github.com/stackabletech/hdfs-topology-provider/pull/9
+[#25]: https://github.com/stackabletech/hdfs-topology-provider/pull/25
 
 ## [0.3.0] - 2024-02-28
 
